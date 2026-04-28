@@ -1,4 +1,9 @@
-"""Panel de marcador — tarjeta white rounded-xl con chips tipo scoreboard."""
+"""Panel de marcador compacto reutilizable.
+
+Variante secundaria del marcador (la página `/scoreboard` integra su propia
+tabla extendida). Aquí mantenemos un componente más simple por si se reutiliza
+en listados o vistas resumen.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +13,6 @@ from ..states.scoreboard_state import ScoreboardState
 
 
 def _chip(value, accent: str = "default") -> rx.Component:
-    """Chip tipo scoreboard: bloque graphite con texto a gran contraste."""
     tones = {
         "default": "bg-graphite text-surface-container-lowest",
         "primary": "bg-graphite text-primary-container",
@@ -22,7 +26,7 @@ def _chip(value, accent: str = "default") -> rx.Component:
     )
 
 
-def _player_row(name, points, games, sets_, is_primary: bool = False) -> rx.Component:
+def _player_row(name, point_visual, games, sets_, is_primary: bool = False) -> rx.Component:
     accent_bar = (
         "border-l-4 border-primary-container" if is_primary else "border-l-4 border-transparent"
     )
@@ -34,7 +38,7 @@ def _player_row(name, points, games, sets_, is_primary: bool = False) -> rx.Comp
         rx.el.div(
             _chip(sets_),
             _chip(games),
-            _chip(points, accent="primary"),
+            _chip(point_visual, accent="primary"),
             class_name="flex items-center gap-xs pr-md",
         ),
         class_name=(
@@ -62,17 +66,17 @@ def score_panel() -> rx.Component:
     return rx.el.div(
         _column_header(),
         _player_row(
-            ScoreboardState.player_a,
-            ScoreboardState.points_a,
-            ScoreboardState.games_a,
-            ScoreboardState.sets_a,
+            ScoreboardState.player_j1,
+            ScoreboardState.score_visual_j1,
+            ScoreboardState.juegos_j1,
+            ScoreboardState.sets_j1,
             is_primary=True,
         ),
         _player_row(
-            ScoreboardState.player_b,
-            ScoreboardState.points_b,
-            ScoreboardState.games_b,
-            ScoreboardState.sets_b,
+            ScoreboardState.player_j2,
+            ScoreboardState.score_visual_j2,
+            ScoreboardState.juegos_j2,
+            ScoreboardState.sets_j2,
             is_primary=False,
         ),
         class_name=(

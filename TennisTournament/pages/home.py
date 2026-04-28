@@ -1,76 +1,65 @@
-"""Landing / selector de competición con estilo Advantage."""
+"""CourtManager — Home / Dashboard.
+
+Réplica del blueprint Stitch: TopAppBar, bento grid (Liga / Torneo),
+sección de competiciones recientes y BottomNavBar mobile.
+"""
 
 from __future__ import annotations
 
 import reflex as rx
 
-from ..components.navbar import navbar
+from ..components.bento_card import bento_card
+from ..components.bottom_nav import bottom_nav
+from ..components.recent_item import recent_item
+from ..components.top_bar import top_bar
+from ..states.home_state import HomeState
 
 
-def _card(title: str, desc: str, href: str, badge: str) -> rx.Component:
-    return rx.link(
-        rx.el.div(
-            rx.el.span(
-                badge,
-                class_name=(
-                    "inline-block px-sm py-xs mb-sm rounded-full "
-                    "bg-primary-container text-on-primary-container "
-                    "text-label-bold uppercase tracking-wider"
-                ),
-            ),
-            rx.el.h3(title, class_name="text-headline-lg text-graphite mb-xs"),
-            rx.el.p(desc, class_name="text-body-md text-on-surface-variant"),
-            class_name=(
-                "p-lg rounded-xl bg-surface-container-lowest border-l-4 border-primary-container "
-                "shadow-card hover:shadow-lift transition-shadow min-h-[12rem]"
-            ),
+def _bento_grid() -> rx.Component:
+    return rx.el.section(
+        bento_card(
+            title="Crear Liga",
+            subtitle="(Round Robin)",
+            icon="format_list_numbered",
+            href="/tournament-config",
         ),
-        href=href,
-        class_name="block",
+        bento_card(
+            title="Crear Torneo",
+            subtitle="(Eliminatoria)",
+            icon="emoji_events",
+            href="/tournament-config",
+        ),
+        class_name="grid grid-cols-1 md:grid-cols-2 gap-sm",
+    )
+
+
+def _recent_competitions() -> rx.Component:
+    return rx.el.section(
+        rx.el.h3(
+            "Competiciones Recientes",
+            class_name="text-headline-lg text-on-surface",
+        ),
+        rx.box(
+            rx.foreach(HomeState.recent_competitions, recent_item),
+            class_name="grid grid-cols-1 gap-base",
+        ),
+        class_name="flex flex-col gap-sm mt-md",
     )
 
 
 def home() -> rx.Component:
-    return rx.el.div(
-        navbar(),
+    return rx.box(
+        top_bar(),
         rx.el.main(
-            rx.el.div(
-                rx.el.h1(
-                    "Gestión de torneos de tenis",
-                    class_name="text-display-lg text-graphite text-center mb-sm",
-                ),
-                rx.el.p(
-                    "Ligas Round Robin y torneos eliminatorios, con marcador en vivo "
-                    "y lógica profesional de tie-break.",
-                    class_name=(
-                        "text-body-lg text-on-surface-variant text-center "
-                        "max-w-2xl mx-auto mb-lg"
-                    ),
-                ),
-                class_name="py-lg",
+            _bento_grid(),
+            _recent_competitions(),
+            class_name=(
+                "p-container-padding md:p-lg max-w-4xl mx-auto flex flex-col gap-lg"
             ),
-            rx.el.div(
-                _card(
-                    "Marcador en vivo",
-                    "Arbitra un partido con ventaja de 2 puntos y tie-break a 7.",
-                    "/scoreboard",
-                    "Live",
-                ),
-                _card(
-                    "Liga Round Robin x2",
-                    "Todos contra todos, ida y vuelta, con tabla de posiciones.",
-                    "/league",
-                    "Liga",
-                ),
-                _card(
-                    "Torneo eliminatorio",
-                    "Bracket de una o varias rondas hasta la final.",
-                    "/tournament",
-                    "Torneo",
-                ),
-                class_name="grid grid-cols-1 md:grid-cols-3 gap-md max-w-5xl mx-auto",
-            ),
-            class_name="max-w-6xl mx-auto px-sm pb-xl",
         ),
-        class_name="min-h-screen bg-surface font-sans",
+        bottom_nav(),
+        class_name=(
+            "bg-background text-on-background text-body-md antialiased "
+            "min-h-screen pb-32 font-sans"
+        ),
     )

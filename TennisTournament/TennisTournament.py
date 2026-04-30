@@ -4,10 +4,12 @@ import reflex as rx
 
 from .pages.home import home
 from .pages.league import league
+from .pages.league_dashboard import league_dashboard
 from .pages.scoreboard import scoreboard
 from .pages.tournament import tournament
 from .pages.tournament_config import tournament_config
 from .states.config_state import ConfigState
+from .states.scoreboard_state import ScoreboardState
 
 
 app = rx.App(
@@ -22,12 +24,22 @@ app = rx.App(
     },
 )
 app.add_page(home, route="/", title="CourtManager")
-app.add_page(scoreboard, route="/scoreboard", title="Marcador en vivo")
+app.add_page(
+    scoreboard,
+    route="/scoreboard",
+    title="Marcador en vivo",
+    on_load=ScoreboardState.setup_scoreboard,
+)
 app.add_page(league, route="/league", title="Liga")
 app.add_page(tournament, route="/tournament", title="Torneo")
 app.add_page(
     tournament_config,
     route="/tournament-config",
-    title="Configuración de Torneo",
+    title="Configuración",
     on_load=ConfigState.setup_page,
+)
+app.add_page(
+    league_dashboard,
+    route="/league-dashboard",
+    title="Liga · Dashboard",
 )

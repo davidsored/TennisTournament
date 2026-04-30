@@ -4,10 +4,17 @@ from __future__ import annotations
 
 import reflex as rx
 
+from .league_state import LeagueState
+
+
+COMPETITION_LEAGUE = "league"
+COMPETITION_TOURNAMENT = "tournament"
+
 
 class ConfigState(rx.State):
     """Maneja los datos del formulario de creación de competición."""
 
+    competition_type: str = COMPETITION_TOURNAMENT  # "league" | "tournament"
     tournament_name: str = ""
     sets_per_match: int = 3
     games_per_set: int = 6
@@ -16,11 +23,15 @@ class ConfigState(rx.State):
     # ---------------- Lifecycle ----------------
 
     def setup_page(self) -> None:
-        """Resetea el formulario a sus valores por defecto cada vez que se entra."""
+        """Resetea el formulario y lee `?type=` de la URL al entrar en la página."""
         self.tournament_name = ""
         self.sets_per_match = 3
         self.games_per_set = 6
         self.players = ["", ""]
+        type_param = self.router.page.params.get("type", COMPETITION_TOURNAMENT)
+        self.competition_type = (
+            COMPETITION_LEAGUE if type_param == COMPETITION_LEAGUE else COMPETITION_TOURNAMENT
+        )
 
     # ---------------- Texto / inputs ----------------
 
@@ -62,23 +73,56 @@ class ConfigState(rx.State):
 
     @rx.var
     def registered_count(self) -> int:
-        """Cantidad de jugadores con nombre no vacío (los "inscritos")."""
         return sum(1 for p in self.players if p.strip())
 
     @rx.var
     def registered_label(self) -> str:
         return f"{self.registered_count} inscritos"
 
+    @rx.var
+    def page_title(self) -> str:
+        return (
+            "Configuración de Liga"
+            if self.competition_type == COMPETITION_LEAGUE
+            else "Configuración de Torneo"
+        )
+
+    @rx.var
+    def is_league(self) -> bool:
+        return self.competition_type == COMPETITION_LEAGUE
+
     # ---------------- Acción guardar ----------------
 
-    def save_config(self):
+    async def save_config(self):
+        clean_players = [p for p in self.players if p.strip()]
+
+        if self.competition_type == COMPETITION_LEAGUE:
+            league = await self.get_state(LeagueState)
+            league.setup_league(
+                name=self.tournament_name or "Liga sin nombre",
+                players=clean_players,
+                sets_per_match=self.sets_per_match,
+                games_per_set=self.games_per_set,
+            )
+            print(
+                "Liga creada:",
+                {
+                    "name": self.tournament_name,
+                    "players": clean_players,
+                    "matches": len(league.matches),
+                    "rounds": league.total_rounds,
+                },
+            )
+            return rx.redirect("/league-dashboard")
+
+        # Torneo (eliminatorio) — pendiente de cablear; por ahora va al marcador.
         print(
-            "Configuración guardada:",
+            "Torneo guardado:",
             {
                 "name": self.tournament_name,
                 "sets_per_match": self.sets_per_match,
                 "games_per_set": self.games_per_set,
-                "players": [p for p in self.players if p.strip()],
+                "players": clean_players,
             },
         )
         return rx.redirect("/scoreboard")

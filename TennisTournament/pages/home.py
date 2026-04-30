@@ -21,13 +21,13 @@ def _bento_grid() -> rx.Component:
             title="Crear Liga",
             subtitle="(Round Robin)",
             icon="format_list_numbered",
-            href="/tournament-config",
+            href="/tournament-config?type=league",
         ),
         bento_card(
             title="Crear Torneo",
             subtitle="(Eliminatoria)",
             icon="emoji_events",
-            href="/tournament-config",
+            href="/tournament-config?type=tournament",
         ),
         class_name="grid grid-cols-1 md:grid-cols-2 gap-sm",
     )

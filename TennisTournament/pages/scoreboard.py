@@ -15,14 +15,23 @@ from ..states.scoreboard_state import ScoreboardState
 # ============================ Header ============================
 
 def _status_pills() -> rx.Component:
-    return rx.el.div(
-        rx.el.span(
-            ScoreboardState.estado_label,
-            class_name=(
-                "inline-flex items-center px-3 py-1 rounded-full bg-primary-container "
-                "text-on-primary-container text-label-bold tracking-wide uppercase shadow-sm"
-            ),
+    estado_class = rx.cond(
+        ScoreboardState.is_finished,
+        # Finalizado → tono apagado (gris oscuro/inverso) para indicar bloqueo.
+        (
+            "inline-flex items-center px-3 py-1 rounded-full "
+            "bg-inverse-surface text-inverse-on-surface "
+            "text-label-bold tracking-wide uppercase shadow-sm"
         ),
+        # En juego → primary-container (verde lima) habitual.
+        (
+            "inline-flex items-center px-3 py-1 rounded-full "
+            "bg-primary-container text-on-primary-container "
+            "text-label-bold tracking-wide uppercase shadow-sm"
+        ),
+    )
+    return rx.el.div(
+        rx.el.span(ScoreboardState.estado_label, class_name=estado_class),
         rx.el.span(
             ScoreboardState.current_set_label,
             class_name=(
@@ -46,18 +55,11 @@ def _header_section() -> rx.Component:
                 ScoreboardState.match_subtitle,
                 class_name="text-body-md text-secondary",
             ),
-            class_name="flex flex-col gap-1",
+            class_name="flex flex-col gap-1 items-center",
         ),
-        rx.el.button(
-            rx.icon("settings", size=22),
-            aria_label="Ajustes del partido",
-            class_name=(
-                "p-2 rounded-full text-secondary hover:bg-surface-container "
-                "active:bg-surface-container-high transition-colors"
-            ),
-        ),
+        
         class_name=(
-            "px-container-padding pt-md pb-sm flex justify-between items-start shrink-0"
+            "px-container-padding pt-md pb-sm flex justify-center items-center shrink-0"
         ),
     )
 
@@ -86,7 +88,7 @@ def _table_header() -> rx.Component:
         rx.el.div(
             "Juego",
             class_name=(
-                "w-12 text-center text-label-bold text-on-surface uppercase "
+                "w-16 text-center text-label-bold text-on-surface uppercase "
                 "tracking-wider text-xs border-l border-surface-container pl-2"
             ),
         ),
@@ -169,7 +171,7 @@ def _player_row(
         rx.el.div(
             games,
             class_name=(
-                "w-12 text-center text-headline-xl text-on-surface "
+                "w-14 text-center text-headline-xl text-on-surface "
                 "border-l border-surface-container pl-2"
             ),
         ),
@@ -215,6 +217,43 @@ def _score_card() -> rx.Component:
             "shadow-[0_4px_24px_-8px_rgba(31,41,55,0.08)] overflow-hidden "
             "border border-surface-container flex flex-col"
         ),
+    )
+
+
+# ====================== Match finished banner ======================
+
+def _finished_banner() -> rx.Component:
+    """Aviso visible solo cuando el partido ha terminado.
+
+    Bloquea visualmente el marcador y comunica el ganador. La salida real la
+    dispara el botón "Finalizar partido" del footer (no es automática).
+    """
+    return rx.cond(
+        ScoreboardState.is_finished,
+        rx.el.div(
+            rx.icon("trophy", size=22, class_name="text-on-primary-container"),
+            rx.el.div(
+                rx.el.span(
+                    "¡Partido Finalizado!",
+                    class_name="text-headline-lg text-on-surface block",
+                ),
+                rx.el.span(
+                    "Ganador: ",
+                    rx.el.span(
+                        ScoreboardState.winner_name,
+                        class_name="font-bold text-on-primary-container",
+                    ),
+                    class_name="text-body-md text-on-surface-variant",
+                ),
+                class_name="flex flex-col",
+            ),
+            class_name=(
+                "flex items-center gap-3 px-md py-sm rounded-xl "
+                "bg-primary-container/30 border border-primary-container "
+                "shadow-[0_4px_24px_-8px_rgba(31,41,55,0.08)]"
+            ),
+        ),
+        rx.fragment(),
     )
 
 
@@ -311,13 +350,19 @@ def _judge_controls() -> rx.Component:
             class_name="flex gap-gutter flex-1 min-h-[160px]",
         ),
         rx.el.div(
+            # Deshacer SIEMPRE accesible (incluso con el partido bloqueado),
+            # solo se desactiva si la pila de undo está vacía.
             _secondary_button(
                 "Deshacer",
                 "undo-2",
                 on_click=ScoreboardState.undo_point,
                 disabled=ScoreboardState.history.length() == 0,
             ),
-            _secondary_button("Falta", "triangle-alert"),
+            _secondary_button(
+                "Falta",
+                "triangle-alert",
+                disabled=ScoreboardState.is_finished,
+            ),
             class_name="flex gap-gutter h-16",
         ),
         class_name="flex-1 flex flex-col gap-gutter mt-2",
@@ -331,11 +376,14 @@ def _finish_footer() -> rx.Component:
         rx.el.button(
             rx.icon("flag", size=22),
             "Finalizar partido",
-            on_click=ScoreboardState.reset_match,
+            on_click=ScoreboardState.finish_match,
+            disabled=ScoreboardState.is_in_progress,
             class_name=(
                 "w-full max-w-3xl bg-primary-container text-on-primary-container "
                 "text-headline-lg py-4 rounded-xl flex justify-center items-center "
-                "gap-3 shadow-lg active:scale-[0.98] transition-transform"
+                "gap-3 shadow-lg active:scale-[0.98] transition-transform "
+                "disabled:opacity-40 disabled:cursor-not-allowed "
+                "disabled:hover:opacity-40"
             ),
         ),
         class_name=(
@@ -353,6 +401,7 @@ def scoreboard() -> rx.Component:
         _header_section(),
         rx.el.main(
             _score_card(),
+            _finished_banner(),
             _tiebreak_indicator(),
             _judge_controls(),
             class_name=(

@@ -28,7 +28,7 @@ def _config_top_bar() -> rx.Component:
             ),
         ),
         rx.el.h1(
-            "Configuración de Torneo",
+            ConfigState.page_title,
             class_name="text-lg font-black text-on-surface",
         ),
         rx.el.button(

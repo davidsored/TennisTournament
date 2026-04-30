@@ -13,6 +13,7 @@ import json
 import reflex as rx
 
 from ..models.match import ESTADO_EN_CURSO, ESTADO_FINALIZADO, Match
+from .league_state import LeagueState
 
 
 class ScoreboardState(rx.State):
@@ -24,7 +25,10 @@ class ScoreboardState(rx.State):
     config_sets: int = 3
 
     match_title: str = "Nuevo partido"
-    match_subtitle: str = "Pista Central • 1h 45m"
+    match_subtitle: str = ""
+
+    # Si > 0, el marcador está jugando un partido concreto de la liga.
+    league_match_id: int = 0
 
     # ---- Estado en vivo (espejo de Match) ----
     puntos_j1: int = 0
@@ -44,6 +48,46 @@ class ScoreboardState(rx.State):
 
     # Pila de snapshots (JSON) para soportar deshacer la última acción.
     history: list[str] = []
+
+    # ---------------- Lifecycle (on_load) ----------------
+
+    async def setup_scoreboard(self):
+        """Reset del marcador y, si la URL trae `?match_id=N`, carga ese partido."""
+        # Reset base
+        self.player_j1 = ""
+        self.player_j2 = ""
+        self.match_title = "Nuevo partido"
+        self.match_subtitle = ""
+        self.league_match_id = 0
+        self.puntos_j1 = self.puntos_j2 = 0
+        self.juegos_j1 = self.juegos_j2 = 0
+        self.sets_j1 = self.sets_j2 = 0
+        self.is_tiebreak = False
+        self.estado = ESTADO_EN_CURSO
+        self.set_history = []
+        self.history = []
+        self.server_id = 1
+
+        match_id_param = self.router.page.params.get("match_id", "")
+        if not match_id_param:
+            return
+        try:
+            match_id = int(match_id_param)
+        except (TypeError, ValueError):
+            return
+
+        league = await self.get_state(LeagueState)
+        target = next((m for m in league.matches if m.id == match_id), None)
+        if target is None:
+            return
+
+        self.player_j1 = target.home
+        self.player_j2 = target.away
+        self.league_match_id = match_id
+        self.config_sets = league.sets_per_match
+        self.match_title = league.league_name or "Partido de Liga"
+        leg_label = "Ida" if target.leg == 1 else "Vuelta"
+        self.match_subtitle = f"Ronda {target.round_num} • {leg_label}"
 
     # ---------------- Helpers internos ----------------
 
@@ -146,19 +190,36 @@ class ScoreboardState(rx.State):
     def is_finished(self) -> bool:
         return self.estado == ESTADO_FINALIZADO
 
+    @rx.var
+    def is_in_progress(self) -> bool:
+        return self.estado != ESTADO_FINALIZADO
+
+    @rx.var
+    def is_league_match(self) -> bool:
+        return self.league_match_id > 0
+
+    @rx.var
+    def winner_name(self) -> str:
+        if self.estado != ESTADO_FINALIZADO:
+            return ""
+        if self.sets_j1 == self.sets_j2:
+            return ""
+        return self.player_j1 if self.sets_j1 > self.sets_j2 else self.player_j2
+
     # ---------------- Event handlers ----------------
 
     def sumar_punto(self, player_id: int) -> None:
-        """Suma un punto delegando en `Match.add_point` (lógica encapsulada).
+        """Suma un punto delegando en `Match.add_point`.
 
-        Antes de ejecutar la acción guarda un snapshot completo del estado para
-        poder deshacerla con `undo_point`. Tras el punto, si se ha cerrado un
-        juego (incluido el cierre de set o tie-break) rota el servidor.
+        IMPORTANTE: aunque al cumplirse la condición de victoria el partido
+        pasa a `ESTADO_FINALIZADO`, NO redirigimos automáticamente. Se entra
+        en una "fase de revisión": los botones de + Punto se bloquean en la
+        UI, pero el usuario aún puede pulsar Deshacer para corregir el último
+        punto. La salida real la dispara el botón "Finalizar partido".
         """
         if self.estado == ESTADO_FINALIZADO:
             return
 
-        # 1) Empuja snapshot a la pila de undo ANTES de mutar el estado.
         self.history.append(self._snapshot())
 
         m = self._build_match()
@@ -173,7 +234,6 @@ class ScoreboardState(rx.State):
         set_closed = (m.sets_j1, m.sets_j2) != sets_before
         games_total_after = m.juegos_j1 + m.juegos_j2
 
-        # 2) Cierre de set → registrar marcador final en el histórico.
         if set_closed:
             winner = 1 if m.sets_j1 > sets_before[0] else 2
             if was_tiebreak:
@@ -184,16 +244,39 @@ class ScoreboardState(rx.State):
                 final_j2 = games_before[1] + (1 if winner == 2 else 0)
             self.set_history.append([final_j1, final_j2])
 
-        # 3) ¿Se ha cerrado un juego?
-        #    - Cierre de set ⇒ el último juego del set quedó cerrado.
-        #    - Cierre normal ⇒ la suma de juegos del set actual aumenta.
-        #    Dentro de un tie-break en curso (sin cerrar set) NO rotamos: el
-        #    tie-break se considera un único juego.
         game_closed = set_closed or (games_total_after > games_total_before)
         if game_closed:
             self.server_id = 2 if self.server_id == 1 else 1
 
         self._sync_from(m)
+        # Sin redirección automática: la UI consultará `is_finished` para bloquearse.
+
+    async def finish_match(self):
+        """Botón manual del footer.
+
+        Solo opera si el partido realmente ha terminado (`is_finished`):
+          1) Si es un partido de liga, persiste el resultado vía `LeagueState.record_result`.
+          2) Redirige al dashboard de la liga (o a la home si no era de liga).
+        Si el partido sigue en curso, no hace nada (la UI también lo bloquea).
+        """
+        if self.estado != ESTADO_FINALIZADO:
+            return  # Defensivo: el botón debería estar disabled, pero por si acaso.
+
+        if self.league_match_id > 0:
+            league = await self.get_state(LeagueState)
+            league.record_result(
+                match_id=self.league_match_id,
+                sets_home=self.sets_j1,
+                sets_away=self.sets_j2,
+            )
+            return rx.redirect("/league-dashboard")
+
+        # Partido fuera de la liga: vuelve a la home.
+        return rx.redirect("/")
+
+    # Alias retro-compatible (por si alguna referencia externa aún lo invoca).
+    async def finish_league_match(self):
+        return await self.finish_match()
 
     def undo_point(self) -> None:
         """Restaura el último snapshot (deshace la última acción registrada)."""

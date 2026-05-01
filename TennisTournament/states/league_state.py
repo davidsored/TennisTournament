@@ -1,8 +1,10 @@
-"""Estado de la liga (Round Robin x2) — gestiona partidos y clasificación."""
+"""Estado de la liga (Round Robin x2) — soporta múltiples competiciones simultáneas."""
 
 from __future__ import annotations
 
 import random
+from typing import Optional
+from uuid import uuid4
 
 import reflex as rx
 from pydantic import BaseModel, Field
@@ -26,6 +28,18 @@ class LeagueMatch(BaseModel):
     status: str = STATUS_PENDIENTE
     sets_home: int = 0
     sets_away: int = 0
+
+
+class Competition(BaseModel):
+    """Una competición independiente (liga o torneo) con su propio calendario."""
+
+    id: str = ""
+    name: str = ""
+    competition_type: str = "league"
+    players: list[str] = Field(default_factory=list)
+    matches: list[LeagueMatch] = Field(default_factory=list)
+    sets_per_match: int = 3
+    games_per_set: int = 6
 
 
 class FixturePair(BaseModel):
@@ -61,15 +75,31 @@ class RoundView(BaseModel):
 
 
 class LeagueState(rx.State):
-    """Liga activa: jugadores, calendario y tabla de clasificación."""
+    """Estado global de competiciones.
 
-    league_name: str = ""
-    players: list[str] = []
-    matches: list[LeagueMatch] = []
-    sets_per_match: int = 3
-    games_per_set: int = 6
+    `competitions` es la fuente de verdad: cada nueva liga/torneo se añade sin
+    borrar las anteriores. `active_id` indica cuál se muestra actualmente en el
+    dashboard. Los campos planos (`league_name`, `players`, `matches`, …) son
+    computed vars que apuntan a la competición activa para que el resto del
+    código (dashboard, scoreboard, etc.) siga funcionando sin cambios.
+    """
 
-    # ---------------- Lifecycle / setup ----------------
+    competitions: list[Competition] = []
+    active_id: str = ""
+
+    # ---------------- Lifecycle ----------------
+
+    def setup_dashboard(self) -> None:
+        """Selecciona la competición a mostrar leyendo `?id=…` de la URL."""
+        comp_id = self.router.page.params.get("id", "")
+        if comp_id and any(c.id == comp_id for c in self.competitions):
+            self.active_id = comp_id
+            return
+        # Fallback: si la activa ya no existe, queda la última creada.
+        if self.competitions and not any(
+            c.id == self.active_id for c in self.competitions
+        ):
+            self.active_id = self.competitions[-1].id
 
     def setup_league(
         self,
@@ -78,23 +108,43 @@ class LeagueState(rx.State):
         sets_per_match: int = 3,
         games_per_set: int = 6,
     ) -> None:
-        """Inicializa la liga y genera el calendario Round Robin x2 con sorteo aleatorio."""
+        """Crea una NUEVA liga (no sobreescribe). Genera calendario aleatorio."""
         clean = [p.strip() for p in players if p.strip()]
-        self.league_name = name
-        self.players = clean
-        self.sets_per_match = sets_per_match
-        self.games_per_set = games_per_set
+        if not clean:
+            return
 
         seeding = list(clean)
         random.shuffle(seeding)
-        self.matches = self._build_calendar(seeding)
+
+        # IDs únicos globalmente (entre todas las competiciones).
+        next_id = (
+            max(
+                (m.id for c in self.competitions for m in c.matches),
+                default=0,
+            )
+            + 1
+        )
+        matches = self._build_calendar(seeding, starting_id=next_id)
+
+        new_comp = Competition(
+            id=str(uuid4()),
+            name=name or "Liga sin nombre",
+            competition_type="league",
+            players=clean,
+            matches=matches,
+            sets_per_match=sets_per_match,
+            games_per_set=games_per_set,
+        )
+        # Crucial: append, no reasignación destructiva.
+        self.competitions = self.competitions + [new_comp]
+        self.active_id = new_comp.id
 
     @staticmethod
-    def _build_calendar(players: list[str]) -> list[LeagueMatch]:
-        """Genera ida y vuelta compartiendo `round_num` (ronda 1 → ida + vuelta)."""
+    def _build_calendar(players: list[str], starting_id: int = 1) -> list[LeagueMatch]:
+        """Ida y vuelta con `round_num` compartido. IDs empiezan en `starting_id`."""
         base_rounds = round_robin(players)
         out: list[LeagueMatch] = []
-        idx = 0
+        idx = starting_id - 1
         for r, round_matches in enumerate(base_rounds, start=1):
             for home, away in round_matches:
                 idx += 1
@@ -114,37 +164,87 @@ class LeagueState(rx.State):
                 )
         return out
 
-    # ---------------- Mutadores de partidos ----------------
+    # ---------------- Mutadores ----------------
 
     def record_result(
         self, match_id: int, sets_home: int, sets_away: int
     ) -> None:
-        """Cierra un partido con el resultado dado y fuerza reactividad."""
-        updated = False
-        for m in self.matches:
-            if m.id == match_id:
-                m.sets_home = sets_home
-                m.sets_away = sets_away
-                m.status = STATUS_FINALIZADO
-                updated = True
-                break
-        if updated:
-            # Reemplaza la lista para que Reflex detecte la mutación interna.
-            self.matches = list(self.matches)
+        """Cierra un partido en la competición que lo contenga."""
+        for comp in self.competitions:
+            for m in comp.matches:
+                if m.id == match_id:
+                    m.sets_home = sets_home
+                    m.sets_away = sets_away
+                    m.status = STATUS_FINALIZADO
+                    # Actualiza la activa para que `/league-dashboard` muestre
+                    # la liga del partido recién cerrado.
+                    self.active_id = comp.id
+                    # Reasignación para forzar reactividad de Reflex.
+                    self.competitions = list(self.competitions)
+                    return
+
+    # ---------------- Helpers internos ----------------
+
+    def _active(self) -> Optional[Competition]:
+        if not self.active_id:
+            return None
+        return next(
+            (c for c in self.competitions if c.id == self.active_id), None
+        )
+
+    # ---------------- Computed: vista de la competición activa ----------------
+
+    @rx.var
+    def league_name(self) -> str:
+        c = self._active()
+        return c.name if c else ""
+
+    @rx.var
+    def players(self) -> list[str]:
+        c = self._active()
+        return list(c.players) if c else []
+
+    @rx.var
+    def matches(self) -> list[LeagueMatch]:
+        c = self._active()
+        return list(c.matches) if c else []
+
+    @rx.var
+    def sets_per_match(self) -> int:
+        c = self._active()
+        return c.sets_per_match if c else 3
+
+    @rx.var
+    def games_per_set(self) -> int:
+        c = self._active()
+        return c.games_per_set if c else 6
+
+    @rx.var
+    def has_league(self) -> bool:
+        c = self._active()
+        return c is not None and len(c.matches) > 0
+
+    @rx.var
+    def total_rounds(self) -> int:
+        c = self._active()
+        if not c or not c.matches:
+            return 0
+        return max((m.round_num for m in c.matches), default=0)
 
     # ---------------- Computed: clasificación ----------------
 
     @rx.var
     def standings(self) -> list[dict[str, str]]:
-        if not self.players:
+        c = self._active()
+        if not c or not c.players:
             return []
 
         table: dict[str, dict[str, int]] = {
             p: {"pj": 0, "pg": 0, "pp": 0, "sw": 0, "sl": 0, "pts": 0}
-            for p in self.players
+            for p in c.players
         }
 
-        for m in self.matches:
+        for m in c.matches:
             if m.status != STATUS_FINALIZADO:
                 continue
             if m.home not in table or m.away not in table:
@@ -195,9 +295,12 @@ class LeagueState(rx.State):
 
     @rx.var
     def grouped_fixtures(self) -> list[RoundView]:
-        """Lista de rondas; cada ronda lleva pares ida/vuelta alineados."""
+        c = self._active()
+        if not c:
+            return []
+
         by_round: dict[int, dict[str, list[LeagueMatch]]] = {}
-        for m in self.matches:
+        for m in c.matches:
             entry = by_round.setdefault(m.round_num, {"ida": [], "vuelta": []})
             (entry["ida"] if m.leg == 1 else entry["vuelta"]).append(m)
 
@@ -232,21 +335,15 @@ class LeagueState(rx.State):
                     pair.vuelta_sets_home = str(vuelta.sets_home)
                     pair.vuelta_sets_away = str(vuelta.sets_away)
                     finished = vuelta.status == STATUS_FINALIZADO
-                    pair.vuelta_home_winner = finished and vuelta.sets_home > vuelta.sets_away
-                    pair.vuelta_away_winner = finished and vuelta.sets_away > vuelta.sets_home
+                    pair.vuelta_home_winner = (
+                        finished and vuelta.sets_home > vuelta.sets_away
+                    )
+                    pair.vuelta_away_winner = (
+                        finished and vuelta.sets_away > vuelta.sets_home
+                    )
 
                 pairs.append(pair)
 
             rounds.append(RoundView(round_num=r, label=f"Ronda {r}", pairs=pairs))
 
         return rounds
-
-    @rx.var
-    def has_league(self) -> bool:
-        return len(self.players) > 0 and len(self.matches) > 0
-
-    @rx.var
-    def total_rounds(self) -> int:
-        if not self.matches:
-            return 0
-        return max((m.round_num for m in self.matches), default=0)

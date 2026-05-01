@@ -77,17 +77,28 @@ class ScoreboardState(rx.State):
             return
 
         league = await self.get_state(LeagueState)
-        target = next((m for m in league.matches if m.id == match_id), None)
-        if target is None:
+        # Buscar el partido en cualquier competición (los IDs son globales).
+        target_comp = None
+        target_match = None
+        for comp in league.competitions:
+            for m in comp.matches:
+                if m.id == match_id:
+                    target_comp = comp
+                    target_match = m
+                    break
+            if target_match is not None:
+                break
+
+        if target_match is None or target_comp is None:
             return
 
-        self.player_j1 = target.home
-        self.player_j2 = target.away
+        self.player_j1 = target_match.home
+        self.player_j2 = target_match.away
         self.league_match_id = match_id
-        self.config_sets = league.sets_per_match
-        self.match_title = league.league_name or "Partido de Liga"
-        leg_label = "Ida" if target.leg == 1 else "Vuelta"
-        self.match_subtitle = f"Ronda {target.round_num} • {leg_label}"
+        self.config_sets = target_comp.sets_per_match
+        self.match_title = target_comp.name or "Partido de Liga"
+        leg_label = "Ida" if target_match.leg == 1 else "Vuelta"
+        self.match_subtitle = f"Ronda {target_match.round_num} • {leg_label}"
 
     # ---------------- Helpers internos ----------------
 

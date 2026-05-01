@@ -1,4 +1,4 @@
-"""Item de la lista "Competiciones Recientes" con pill de estado."""
+"""Item de la lista "Competiciones Recientes" con pill de estado y navegación."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ def _status_pill(status, tone) -> rx.Component:
                 "rounded-full text-xs text-label-bold tracking-wide"
             ),
             (
-                "bg-surface-variant text-on-surface-variant px-3 py-1 "
+                "bg-surface-container-highest text-on-surface-variant px-3 py-1 "
                 "rounded-full text-xs text-label-bold tracking-wide"
             ),
         ),
@@ -26,11 +26,11 @@ def _status_pill(status, tone) -> rx.Component:
 
 
 def recent_item(comp) -> rx.Component:
-    """Renderiza una competición reciente.
+    """Renderiza una competición reciente clicable.
 
-    `comp` es un dict reactivo con: title, subtitle, icon, status, tone.
+    `comp` es un dict reactivo con: title, subtitle, icon, status, tone, href.
     """
-    return rx.box(
+    card = rx.box(
         rx.box(
             rx.box(
                 material_icon(comp["icon"], class_name="text-primary text-2xl"),
@@ -57,6 +57,7 @@ def recent_item(comp) -> rx.Component:
             "flex items-center justify-between "
             "border border-surface-container-highest "
             "shadow-[0_2px_10px_-4px_rgba(31,41,55,0.04)] "
-            "cursor-pointer hover:bg-surface-container-low transition-colors"
+            "hover:bg-surface-container-low transition-colors"
         ),
     )
+    return rx.link(card, href=comp["href"], class_name="block cursor-pointer")

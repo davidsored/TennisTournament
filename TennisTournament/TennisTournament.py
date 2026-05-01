@@ -9,6 +9,8 @@ from .pages.scoreboard import scoreboard
 from .pages.tournament import tournament
 from .pages.tournament_config import tournament_config
 from .states.config_state import ConfigState
+from .states.home_state import HomeState
+from .states.league_state import LeagueState
 from .states.scoreboard_state import ScoreboardState
 
 
@@ -23,7 +25,12 @@ app = rx.App(
         "color": "#191c1d",
     },
 )
-app.add_page(home, route="/", title="CourtManager")
+app.add_page(
+    home,
+    route="/",
+    title="CourtManager",
+    on_load=HomeState.setup_home,
+)
 app.add_page(
     scoreboard,
     route="/scoreboard",
@@ -42,4 +49,5 @@ app.add_page(
     league_dashboard,
     route="/league-dashboard",
     title="Liga · Dashboard",
+    on_load=LeagueState.setup_dashboard,
 )

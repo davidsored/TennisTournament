@@ -71,6 +71,11 @@ def _details_card() -> rx.Component:
         rx.box(
             rx.el.label(
                 "Nombre del Torneo",
+                rx.el.span(
+                    " *",
+                    class_name="text-error font-bold",
+                    aria_label="campo obligatorio",
+                ),
                 html_for="tournament-name",
                 class_name="block text-label-bold text-on-surface-variant mb-xs",
             ),
@@ -80,11 +85,14 @@ def _details_card() -> rx.Component:
                 value=ConfigState.tournament_name,
                 on_change=ConfigState.set_tournament_name,
                 type="text",
+                required=True,
+                aria_required="true",
                 class_name=(
                     "w-full bg-surface-container-lowest border border-outline-variant "
                     "rounded min-h-[48px] px-sm py-xs "
                     "focus:outline-none focus:border-primary-container "
                     "focus:ring-2 focus:ring-primary-container/20 transition-colors "
+                    "invalid:border-error invalid:ring-error/20 "
                     "text-on-surface text-body-md placeholder:text-outline"
                 ),
             ),

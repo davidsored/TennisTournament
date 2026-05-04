@@ -94,12 +94,25 @@ class ConfigState(rx.State):
     # ---------------- Acción guardar ----------------
 
     async def save_config(self):
+        # Validación: nombre obligatorio. Aviso visual + corte temprano (no
+        # llegamos a setup_league/setup_tournament si está vacío).
+        name = self.tournament_name.strip()
+        if not name:
+            return rx.toast.error(
+                "Por favor, introduce un nombre para la competición"
+            )
+
         clean_players = [p for p in self.players if p.strip()]
+        if len(clean_players) < 2:
+            return rx.toast.error(
+                "Añade al menos 2 jugadores para crear la competición"
+            )
+
+        league = await self.get_state(LeagueState)
 
         if self.competition_type == COMPETITION_LEAGUE:
-            league = await self.get_state(LeagueState)
             league.setup_league(
-                name=self.tournament_name or "Liga sin nombre",
+                name=name,
                 players=clean_players,
                 sets_per_match=self.sets_per_match,
                 games_per_set=self.games_per_set,
@@ -107,7 +120,7 @@ class ConfigState(rx.State):
             print(
                 "Liga creada:",
                 {
-                    "name": self.tournament_name,
+                    "name": name,
                     "players": clean_players,
                     "matches": len(league.matches),
                     "rounds": league.total_rounds,
@@ -115,14 +128,20 @@ class ConfigState(rx.State):
             )
             return rx.redirect("/league-dashboard")
 
-        # Torneo (eliminatorio) — pendiente de cablear; por ahora va al marcador.
+        # Torneo eliminatorio (cuadro con BYEs si nº jugadores no es potencia de 2)
+        league.setup_tournament(
+            name=name,
+            players=clean_players,
+            sets_per_match=self.sets_per_match,
+            games_per_set=self.games_per_set,
+        )
         print(
-            "Torneo guardado:",
+            "Torneo creado:",
             {
-                "name": self.tournament_name,
-                "sets_per_match": self.sets_per_match,
-                "games_per_set": self.games_per_set,
+                "name": name,
                 "players": clean_players,
+                "matches": len(league.matches),
+                "rounds": league.total_rounds,
             },
         )
-        return rx.redirect("/scoreboard")
+        return rx.redirect(f"/tournament-dashboard?id={league.active_id}")

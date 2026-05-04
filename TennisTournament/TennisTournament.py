@@ -8,10 +8,12 @@ from .pages.league_dashboard import league_dashboard
 from .pages.scoreboard import scoreboard
 from .pages.tournament import tournament
 from .pages.tournament_config import tournament_config
+from .pages.tournament_dashboard import tournament_dashboard
 from .states.config_state import ConfigState
 from .states.home_state import HomeState
 from .states.league_state import LeagueState
 from .states.scoreboard_state import ScoreboardState
+from .states.tournament_state import TournamentState
 
 
 app = rx.App(
@@ -50,4 +52,10 @@ app.add_page(
     route="/league-dashboard",
     title="Liga · Dashboard",
     on_load=LeagueState.setup_dashboard,
+)
+app.add_page(
+    tournament_dashboard,
+    route="/tournament-dashboard",
+    title="Torneo · Cuadro",
+    on_load=TournamentState.setup_view,
 )

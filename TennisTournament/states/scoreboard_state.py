@@ -30,6 +30,10 @@ class ScoreboardState(rx.State):
     # Si > 0, el marcador está jugando un partido concreto de la liga.
     league_match_id: int = 0
 
+    # ID del torneo si el partido viene de un cuadro eliminatorio (vacío si liga).
+    # Lo usamos para volver al dashboard correcto al finalizar.
+    tournament_id: str = ""
+
     # ---- Estado en vivo (espejo de Match) ----
     puntos_j1: int = 0
     puntos_j2: int = 0
@@ -59,6 +63,7 @@ class ScoreboardState(rx.State):
         self.match_title = "Nuevo partido"
         self.match_subtitle = ""
         self.league_match_id = 0
+        self.tournament_id = ""
         self.puntos_j1 = self.puntos_j2 = 0
         self.juegos_j1 = self.juegos_j2 = 0
         self.sets_j1 = self.sets_j2 = 0
@@ -96,9 +101,17 @@ class ScoreboardState(rx.State):
         self.player_j2 = target_match.away
         self.league_match_id = match_id
         self.config_sets = target_comp.sets_per_match
-        self.match_title = target_comp.name or "Partido de Liga"
-        leg_label = "Ida" if target_match.leg == 1 else "Vuelta"
-        self.match_subtitle = f"Ronda {target_match.round_num} • {leg_label}"
+        self.match_title = target_comp.name or "Partido"
+        # Recordamos el origen del partido para volver al dashboard correcto
+        # tras finalizar (torneo vs liga).
+        self.tournament_id = target_match.tournament_id or ""
+        if target_comp.competition_type == "tournament":
+            self.match_subtitle = f"Ronda {target_match.round_num}"
+        else:
+            leg_label = "Ida" if target_match.leg == 1 else "Vuelta"
+            self.match_subtitle = (
+                f"Ronda {target_match.round_num} • {leg_label}"
+            )
 
     # ---------------- Helpers internos ----------------
 
@@ -266,8 +279,12 @@ class ScoreboardState(rx.State):
         """Botón manual del footer.
 
         Solo opera si el partido realmente ha terminado (`is_finished`):
-          1) Si es un partido de liga, persiste el resultado vía `LeagueState.record_result`.
-          2) Redirige al dashboard de la liga (o a la home si no era de liga).
+          1) Si es un partido de competición (liga o torneo), persiste el
+             resultado vía `LeagueState.record_result` ANTES de redirigir.
+          2) Redirige al dashboard correcto según el origen:
+             - Torneo (`tournament_id` no vacío) → `/tournament-dashboard?id=…`
+             - Liga                              → `/league-dashboard`
+          3) Si no proviene de competición, vuelve a la home.
         Si el partido sigue en curso, no hace nada (la UI también lo bloquea).
         """
         if self.estado != ESTADO_FINALIZADO:
@@ -275,14 +292,20 @@ class ScoreboardState(rx.State):
 
         if self.league_match_id > 0:
             league = await self.get_state(LeagueState)
+            # Persistir PRIMERO para que el dashboard refleje el resultado actualizado.
             league.record_result(
                 match_id=self.league_match_id,
                 sets_home=self.sets_j1,
                 sets_away=self.sets_j2,
             )
+            # Redirección inteligente según el origen del partido.
+            if self.tournament_id:
+                return rx.redirect(
+                    f"/tournament-dashboard?id={self.tournament_id}"
+                )
             return rx.redirect("/league-dashboard")
 
-        # Partido fuera de la liga: vuelve a la home.
+        # Partido fuera de competición: vuelve a la home.
         return rx.redirect("/")
 
     # Alias retro-compatible (por si alguna referencia externa aún lo invoca).

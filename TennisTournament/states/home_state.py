@@ -40,17 +40,22 @@ class HomeState(rx.State):
             is_active = total > 0 and finalizados < total
 
             unique_players = len({p for p in comp.players if p.strip()})
-            type_label = (
-                "Round Robin" if comp.competition_type == "league" else "Eliminatoria"
+            is_tournament = comp.competition_type == "tournament"
+            type_label = "Eliminatoria" if is_tournament else "Round Robin"
+            icon = "emoji_events" if is_tournament else "leaderboard"
+            target = (
+                f"/tournament-dashboard?id={comp.id}"
+                if is_tournament
+                else f"/league-dashboard?id={comp.id}"
             )
             items.append(
                 {
-                    "title": comp.name or "Liga sin nombre",
+                    "title": comp.name or "Competición sin nombre",
                     "subtitle": f"{type_label} • {unique_players} jugadores",
-                    "icon": "leaderboard",
+                    "icon": icon,
                     "status": "Activa" if is_active else "Finalizada",
                     "tone": "active" if is_active else "scheduled",
-                    "href": f"/league-dashboard?id={comp.id}",
+                    "href": target,
                 }
             )
 

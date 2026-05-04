@@ -22,17 +22,16 @@ class HomeState(rx.State):
     # ---------------- Lifecycle ----------------
 
     async def setup_home(self):
-        """Recolecta TODAS las competiciones desde `LeagueState` y las prepara para la UI.
+        """Recolecta TODAS las competiciones desde Postgres y las prepara para la UI.
 
-        Itera sobre `LeagueState.competitions` (cada entrada = una competición
-        única identificada por su `id`) y arma un dict por competición con la
-        info que consume `recent_item`: título, subtítulo con nº de jugadores,
-        icono temático, pill de estado (Activa/Finalizada) y href con `?id=…`
-        para que el dashboard cargue la correcta.
+        Hidrata `LeagueState` (lectura desde DB) y itera sobre todas las
+        competiciones para armar el listado del home con icono, pill de estado
+        y href apuntando al dashboard correspondiente.
         """
         items: list[dict[str, str]] = []
 
         league = await self.get_state(LeagueState)
+        league._hydrate()  # refresca desde Postgres
         for comp in league.competitions:
             total = len(comp.matches)
             finalizados = sum(
@@ -51,7 +50,7 @@ class HomeState(rx.State):
             )
             items.append(
                 {
-                    "id": comp.id,
+                    "id": str(comp.id),  # str para que list[dict[str, str]] funcione
                     "title": comp.name or "Competición sin nombre",
                     "subtitle": f"{type_label} • {unique_players} jugadores",
                     "icon": icon,
@@ -76,20 +75,23 @@ class HomeState(rx.State):
         self.active_tab = tab
 
     async def delete_competition(self, comp_id: str):
-        """Borra una competición tras verificar que el usuario es admin.
+        """Borra una competición de Postgres tras verificar admin.
 
-        El check `AdminState.is_admin` revalida `admin_token` contra la
-        env var `ADMIN_KEY` en el servidor — no basta con setear el
-        localStorage en el cliente.
+        `comp_id` viene como string desde la UI (recent_item) — lo parseamos
+        a int antes de pasarlo a `LeagueState.delete_competition`.
         """
         admin = await self.get_state(AdminState)
         if not admin.is_admin:
             return rx.toast.error(
                 "Solo el administrador puede borrar competiciones"
             )
+        try:
+            cid = int(comp_id)
+        except (TypeError, ValueError):
+            return rx.toast.error("Identificador de competición inválido")
         league = await self.get_state(LeagueState)
-        league.delete_competition(comp_id)
-        # Refresca el listado local sin volver a hacer setup_home completo.
+        league.delete_competition(cid)
+        # Refresca el listado local desde la DB (post-delete).
         self.recent_competitions = [
             item for item in self.recent_competitions if item.get("id") != comp_id
         ]

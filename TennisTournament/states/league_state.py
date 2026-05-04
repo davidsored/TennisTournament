@@ -1,16 +1,25 @@
-"""Estado de la liga (Round Robin x2) — soporta múltiples competiciones simultáneas."""
+"""Estado de competiciones — backed por Supabase vía rx.session().
+
+Las mutaciones (crear liga/torneo, registrar resultado, eliminar) escriben a
+PostgreSQL con add+commit. La hidratación (`_hydrate`) lee leagues, tournaments
+y league_matches y construye las vistas pydantic transitorias que consumen los
+componentes UI (CompetitionView / FixturePair / RoundView).
+"""
 
 from __future__ import annotations
 
+import json
 import math
 import random
 from typing import Optional
-from uuid import uuid4
 
 import reflex as rx
 from pydantic import BaseModel, Field
+from sqlmodel import select
 
-from ..models.league import round_robin
+from ..models.league import League, round_robin
+from ..models.league_match import LeagueMatch
+from ..models.tournament import Tournament
 
 
 STATUS_PENDIENTE = "Pendiente"
@@ -18,46 +27,10 @@ STATUS_EN_CURSO = "En curso"
 STATUS_FINALIZADO = "Finalizado"
 
 
-class LeagueMatch(BaseModel):
-    """Partido del calendario.
-
-    Soporta tanto el formato Liga (Round Robin x2) como el formato Torneo
-    eliminatorio. Los campos `tournament_id`, `bracket_position`,
-    `next_match_id` e `is_placeholder` solo se usan cuando el partido pertenece
-    a un torneo eliminatorio (en liga quedan en sus valores por defecto).
-    """
-
-    id: int = 0
-    round_num: int = 0
-    leg: int = 1  # 1 = ida, 2 = vuelta (sólo aplica a liga)
-    home: str = ""
-    away: str = ""
-    status: str = STATUS_PENDIENTE
-    sets_home: int = 0
-    sets_away: int = 0
-
-    # ---- Campos específicos de torneo eliminatorio ----
-    tournament_id: Optional[str] = None        # agrupa partidos del mismo cuadro
-    bracket_position: Optional[int] = None     # índice dentro de la ronda
-    next_match_id: Optional[int] = None        # id del partido al que avanza el ganador
-    is_placeholder: bool = False               # True si los nombres aún no están resueltos
-
-
-class Competition(BaseModel):
-    """Una competición independiente (liga o torneo) con su propio calendario."""
-
-    id: str = ""
-    name: str = ""
-    competition_type: str = "league"
-    players: list[str] = Field(default_factory=list)
-    matches: list[LeagueMatch] = Field(default_factory=list)
-    sets_per_match: int = 3
-    games_per_set: int = 6
+# ----- Pydantic transient views (no persistidos) -----
 
 
 class FixturePair(BaseModel):
-    """Par ida/vuelta de la misma ronda alineados (B vs A para vuelta)."""
-
     has_ida: bool = False
     ida_id: str = ""
     ida_home: str = ""
@@ -80,39 +53,218 @@ class FixturePair(BaseModel):
 
 
 class RoundView(BaseModel):
-    """Una ronda con su etiqueta y los pares de partidos (ida/vuelta)."""
-
     round_num: int = 0
     label: str = ""
     pairs: list[FixturePair] = Field(default_factory=list)
 
 
+class MatchView(BaseModel):
+    """Vista plana de LeagueMatch para consumo desde Reflex."""
+
+    id: int = 0
+    league_id: Optional[int] = None
+    tournament_id: Optional[int] = None
+    round_num: int = 0
+    leg: int = 1
+    home: str = ""
+    away: str = ""
+    status: str = STATUS_PENDIENTE
+    sets_home: int = 0
+    sets_away: int = 0
+    bracket_position: Optional[int] = None
+    next_match_id: Optional[int] = None
+    is_placeholder: bool = False
+
+
+class CompetitionView(BaseModel):
+    """Snapshot de una competición (League o Tournament) con sus matches."""
+
+    id: int = 0
+    name: str = ""
+    competition_type: str = "league"
+    players: list[str] = Field(default_factory=list)
+    sets_per_match: int = 3
+    games_per_set: int = 6
+    matches: list[MatchView] = Field(default_factory=list)
+
+
+def _league_match_to_view(m: LeagueMatch) -> MatchView:
+    return MatchView(
+        id=m.id or 0,
+        league_id=m.league_id,
+        tournament_id=m.tournament_id,
+        round_num=m.round_num,
+        leg=m.leg,
+        home=m.home,
+        away=m.away,
+        status=m.status,
+        sets_home=m.sets_home,
+        sets_away=m.sets_away,
+        bracket_position=m.bracket_position,
+        next_match_id=m.next_match_id,
+        is_placeholder=m.is_placeholder,
+    )
+
+
+def _safe_players(json_str: str) -> list[str]:
+    try:
+        data = json.loads(json_str) if json_str else []
+        return [str(p) for p in data if isinstance(p, str)]
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
 class LeagueState(rx.State):
-    """Estado global de competiciones.
+    """Estado global de competiciones (persistido en Supabase)."""
 
-    `competitions` es la fuente de verdad: cada nueva liga/torneo se añade sin
-    borrar las anteriores. `active_id` indica cuál se muestra actualmente en el
-    dashboard. Los campos planos (`league_name`, `players`, `matches`, …) son
-    computed vars que apuntan a la competición activa para que el resto del
-    código (dashboard, scoreboard, etc.) siga funcionando sin cambios.
-    """
+    # Snapshot cargado desde la DB (la única fuente de verdad real).
+    competitions: list[CompetitionView] = []
 
-    competitions: list[Competition] = []
-    active_id: str = ""
+    # Competición activa para el dashboard (id de DB + tipo).
+    active_competition_id: int = 0
+    active_competition_type: str = ""  # "league" o "tournament"
+
+    # ---------------- Hydration ----------------
+
+    def _hydrate(self) -> None:
+        """Recarga la lista de competiciones desde la base de datos."""
+        with rx.session() as session:
+            leagues = session.exec(select(League)).all()
+            tournaments = session.exec(select(Tournament)).all()
+            all_matches = session.exec(select(LeagueMatch)).all()
+
+        comps: list[CompetitionView] = []
+
+        for lg in leagues:
+            league_matches = [
+                _league_match_to_view(m) for m in all_matches if m.league_id == lg.id
+            ]
+            comps.append(
+                CompetitionView(
+                    id=lg.id or 0,
+                    name=lg.name,
+                    competition_type="league",
+                    players=_safe_players(lg.players_json),
+                    sets_per_match=lg.sets_per_match,
+                    games_per_set=lg.games_per_set,
+                    matches=league_matches,
+                )
+            )
+
+        for tr in tournaments:
+            tournament_matches = [
+                _league_match_to_view(m)
+                for m in all_matches
+                if m.tournament_id == tr.id
+            ]
+            comps.append(
+                CompetitionView(
+                    id=tr.id or 0,
+                    name=tr.name,
+                    competition_type="tournament",
+                    players=_safe_players(tr.players_json),
+                    sets_per_match=tr.sets_per_match,
+                    games_per_set=tr.games_per_set,
+                    matches=tournament_matches,
+                )
+            )
+
+        self.competitions = comps
 
     # ---------------- Lifecycle ----------------
 
     def setup_dashboard(self) -> None:
-        """Selecciona la competición a mostrar leyendo `?id=…` de la URL."""
-        comp_id = self.router.page.params.get("id", "")
-        if comp_id and any(c.id == comp_id for c in self.competitions):
-            self.active_id = comp_id
+        """Hidrata y selecciona la liga activa según `?id=N` (DB id)."""
+        self._hydrate()
+
+        comp_id_param = self.router.page.params.get("id", "")
+        try:
+            target_id = int(comp_id_param) if comp_id_param else 0
+        except (TypeError, ValueError):
+            target_id = 0
+
+        # Busca específicamente liga (el dashboard de liga sólo muestra ligas).
+        target = next(
+            (
+                c
+                for c in self.competitions
+                if c.id == target_id and c.competition_type == "league"
+            ),
+            None,
+        )
+        if target is None:
+            leagues = [
+                c for c in self.competitions if c.competition_type == "league"
+            ]
+            target = leagues[-1] if leagues else None
+
+        if target:
+            self.active_competition_id = target.id
+            self.active_competition_type = target.competition_type
+        else:
+            self.active_competition_id = 0
+            self.active_competition_type = ""
+
+    # ---------------- Mutators (rx.session add + commit) ----------------
+
+    def setup_league(
+        self,
+        name: str,
+        players: list[str],
+        sets_per_match: int = 3,
+        games_per_set: int = 6,
+    ) -> None:
+        """Crea una NUEVA liga en Postgres + calendario Round Robin x2."""
+        if not name or not name.strip():
             return
-        # Fallback: si la activa ya no existe, queda la última creada.
-        if self.competitions and not any(
-            c.id == self.active_id for c in self.competitions
-        ):
-            self.active_id = self.competitions[-1].id
+        clean = [p.strip() for p in players if p.strip()]
+        if len(clean) < 2:
+            return
+
+        seeding = list(clean)
+        random.shuffle(seeding)
+        rounds = round_robin(seeding)
+
+        with rx.session() as session:
+            league = League(
+                name=name.strip(),
+                sets_per_match=sets_per_match,
+                games_per_set=games_per_set,
+                players_json=json.dumps(clean),
+            )
+            session.add(league)
+            session.commit()
+            session.refresh(league)
+
+            for r, round_matches in enumerate(rounds, start=1):
+                for home, away in round_matches:
+                    session.add(
+                        LeagueMatch(
+                            league_id=league.id,
+                            round_num=r,
+                            leg=1,
+                            home=home,
+                            away=away,
+                            status=STATUS_PENDIENTE,
+                        )
+                    )
+                for home, away in round_matches:
+                    session.add(
+                        LeagueMatch(
+                            league_id=league.id,
+                            round_num=r,
+                            leg=2,
+                            home=away,
+                            away=home,
+                            status=STATUS_PENDIENTE,
+                        )
+                    )
+            session.commit()
+
+            self.active_competition_id = league.id or 0
+            self.active_competition_type = "league"
+
+        self._hydrate()
 
     def setup_tournament(
         self,
@@ -121,22 +273,7 @@ class LeagueState(rx.State):
         sets_per_match: int = 3,
         games_per_set: int = 6,
     ) -> None:
-        """Crea un NUEVO torneo eliminatorio con cuadro completo.
-
-        Algoritmo:
-        1) Sortea aleatoriamente los jugadores reales.
-        2) Calcula `bracket_size` como la siguiente potencia de 2 ≥ N de jugadores.
-        3) Genera el seeding garantizando que cada BYE se empareje con un jugador
-           real (nunca BYE vs BYE).
-        4) Crea los partidos por ronda (1 → final), asignando IDs únicos globales.
-        5) Cablea `next_match_id` para que cada partido conozca su sucesor.
-        6) Coloca a los jugadores reales y BYEs en los partidos de Ronda 1; los
-           BYEs auto-finalizan el partido y el jugador real avanza a Ronda 2.
-        7) Rellena los slots aún vacíos de las rondas avanzadas con etiquetas
-           del tipo `"Ganador Partido X"` (placeholders) hasta que se resuelvan
-           las rondas previas.
-        """
-        # Validación defensiva (la UI ya valida en ConfigState.save_config).
+        """Crea un NUEVO torneo eliminatorio en Postgres con bracket completo."""
         if not name or not name.strip():
             return
         real = [p.strip() for p in players if p.strip()]
@@ -150,8 +287,7 @@ class LeagueState(rx.State):
             bracket_size *= 2
         n_byes = bracket_size - n_players
 
-        # Distribuir BYEs: cada BYE se empareja con un jugador real para evitar
-        # combinaciones BYE vs BYE (sin sentido).
+        # Distribuir BYEs: cada uno emparejado con un real.
         seeding: list[str] = []
         for i in range(n_byes):
             seeding.append(real[i])
@@ -160,247 +296,204 @@ class LeagueState(rx.State):
             seeding.append(real[i])
 
         total_rounds = int(math.log2(bracket_size))
-        tournament_id = str(uuid4())
+        winner_set_count = sets_per_match // 2 + 1
 
-        next_global_id = (
-            max(
-                (m.id for c in self.competitions for m in c.matches),
-                default=0,
+        with rx.session() as session:
+            tournament = Tournament(
+                name=name.strip(),
+                sets_per_match=sets_per_match,
+                games_per_set=games_per_set,
+                players_json=json.dumps(real),
             )
-            + 1
-        )
+            session.add(tournament)
+            session.commit()
+            session.refresh(tournament)
 
-        # Construye partidos en cascada (Ronda 1 → Final). El siguiente paso
-        # cablea los `next_match_id` una vez se conocen todos los IDs.
-        rounds_matches: list[list[LeagueMatch]] = []
-        current_id = next_global_id
-        for r in range(total_rounds):
-            n_in_round = bracket_size // (2 ** (r + 1))
-            this_round: list[LeagueMatch] = []
-            for p in range(n_in_round):
-                this_round.append(
-                    LeagueMatch(
-                        id=current_id,
+            # Fase 1: crear todos los partidos sin next_match_id (DB asigna ids).
+            rounds_matches: list[list[LeagueMatch]] = []
+            for r in range(total_rounds):
+                n_in_round = bracket_size // (2 ** (r + 1))
+                this_round: list[LeagueMatch] = []
+                for p in range(n_in_round):
+                    m = LeagueMatch(
+                        tournament_id=tournament.id,
                         round_num=r + 1,
                         leg=1,
                         home="",
                         away="",
                         status=STATUS_PENDIENTE,
-                        tournament_id=tournament_id,
                         bracket_position=p,
-                        next_match_id=None,
                         is_placeholder=(r > 0),
                     )
+                    session.add(m)
+                    this_round.append(m)
+                rounds_matches.append(this_round)
+            session.commit()
+            for rnd in rounds_matches:
+                for m in rnd:
+                    session.refresh(m)
+
+            # Fase 2: cablear next_match_id (ya con ids reales de Postgres).
+            for r in range(total_rounds - 1):
+                for p, m in enumerate(rounds_matches[r]):
+                    m.next_match_id = rounds_matches[r + 1][p // 2].id
+
+            # Fase 3: poblar Ronda 1 con jugadores y BYEs.
+            for p, m in enumerate(rounds_matches[0]):
+                m.home = seeding[p * 2]
+                m.away = seeding[p * 2 + 1]
+                m.is_placeholder = False
+                if m.home == "BYE" and m.away != "BYE":
+                    m.status = STATUS_FINALIZADO
+                    m.sets_home = 0
+                    m.sets_away = winner_set_count
+                elif m.away == "BYE" and m.home != "BYE":
+                    m.status = STATUS_FINALIZADO
+                    m.sets_home = winner_set_count
+                    m.sets_away = 0
+
+            # Fase 4: propagar BYE winners a Ronda 2.
+            all_flat = [m for rnd in rounds_matches for m in rnd]
+            for m in rounds_matches[0]:
+                if m.status != STATUS_FINALIZADO or m.next_match_id is None:
+                    continue
+                winner = m.home if m.sets_home > m.sets_away else m.away
+                if not winner or winner == "BYE":
+                    continue
+                target = next(
+                    (x for x in all_flat if x.id == m.next_match_id), None
                 )
-                current_id += 1
-            rounds_matches.append(this_round)
+                if target is None or m.bracket_position is None:
+                    continue
+                if m.bracket_position % 2 == 0:
+                    target.home = winner
+                else:
+                    target.away = winner
+                if target.home and target.away:
+                    target.is_placeholder = False
 
-        # Cablea `next_match_id`: posición p en ronda r → posición p // 2 en ronda r+1.
-        for r in range(total_rounds - 1):
-            for p, m in enumerate(rounds_matches[r]):
-                m.next_match_id = rounds_matches[r + 1][p // 2].id
+            # Fase 5: rellenar slots vacíos con etiquetas "Ganador Partido X".
+            for r in range(1, total_rounds):
+                for p, m in enumerate(rounds_matches[r]):
+                    prev_a = rounds_matches[r - 1][p * 2]
+                    prev_b = rounds_matches[r - 1][p * 2 + 1]
+                    if not m.home:
+                        m.home = f"Ganador Partido {prev_a.id}"
+                    if not m.away:
+                        m.away = f"Ganador Partido {prev_b.id}"
 
-        # Llena Ronda 1 con el seeding. BYE auto-finaliza con derrota total para BYE.
-        winner_set_count = sets_per_match // 2 + 1  # sets necesarios para ganar
-        for p, m in enumerate(rounds_matches[0]):
-            m.home = seeding[p * 2]
-            m.away = seeding[p * 2 + 1]
-            m.is_placeholder = False
-            if m.home == "BYE" and m.away != "BYE":
-                m.status = STATUS_FINALIZADO
-                m.sets_home = 0
-                m.sets_away = winner_set_count
-            elif m.away == "BYE" and m.home != "BYE":
-                m.status = STATUS_FINALIZADO
-                m.sets_home = winner_set_count
-                m.sets_away = 0
+            # Persistir todos los cambios de Fases 2-5 en una sola transacción.
+            session.commit()
 
-        all_matches = [m for rnd in rounds_matches for m in rnd]
+            self.active_competition_id = tournament.id or 0
+            self.active_competition_type = "tournament"
 
-        # Propaga ganadores de BYE de Ronda 1 a Ronda 2.
-        for m in rounds_matches[0]:
-            if m.status != STATUS_FINALIZADO or m.next_match_id is None:
-                continue
-            winner = m.home if m.sets_home > m.sets_away else m.away
-            if not winner or winner == "BYE":
-                continue
-            target = next((x for x in all_matches if x.id == m.next_match_id), None)
-            if target is None or m.bracket_position is None:
-                continue
-            if m.bracket_position % 2 == 0:
-                target.home = winner
-            else:
-                target.away = winner
-            if target.home and target.away:
-                target.is_placeholder = False
-
-        # Rellena slots vacíos de rondas avanzadas con "Ganador Partido X".
-        for r in range(1, total_rounds):
-            for p, m in enumerate(rounds_matches[r]):
-                prev_a = rounds_matches[r - 1][p * 2]
-                prev_b = rounds_matches[r - 1][p * 2 + 1]
-                if not m.home:
-                    m.home = f"Ganador Partido {prev_a.id}"
-                if not m.away:
-                    m.away = f"Ganador Partido {prev_b.id}"
-
-        new_comp = Competition(
-            id=tournament_id,
-            name=name or "Torneo sin nombre",
-            competition_type="tournament",
-            players=real,
-            matches=all_matches,
-            sets_per_match=sets_per_match,
-            games_per_set=games_per_set,
-        )
-        # Inserción atómica (transacción equivalente sobre la lista en memoria).
-        self.competitions = self.competitions + [new_comp]
-        self.active_id = tournament_id
-
-    def setup_league(
-        self,
-        name: str,
-        players: list[str],
-        sets_per_match: int = 3,
-        games_per_set: int = 6,
-    ) -> None:
-        """Crea una NUEVA liga (no sobreescribe). Genera calendario aleatorio."""
-        # Validación defensiva (la UI ya valida en ConfigState.save_config).
-        if not name or not name.strip():
-            return
-        clean = [p.strip() for p in players if p.strip()]
-        if len(clean) < 2:
-            return
-
-        seeding = list(clean)
-        random.shuffle(seeding)
-
-        # IDs únicos globalmente (entre todas las competiciones).
-        next_id = (
-            max(
-                (m.id for c in self.competitions for m in c.matches),
-                default=0,
-            )
-            + 1
-        )
-        matches = self._build_calendar(seeding, starting_id=next_id)
-
-        new_comp = Competition(
-            id=str(uuid4()),
-            name=name or "Liga sin nombre",
-            competition_type="league",
-            players=clean,
-            matches=matches,
-            sets_per_match=sets_per_match,
-            games_per_set=games_per_set,
-        )
-        # Crucial: append, no reasignación destructiva.
-        self.competitions = self.competitions + [new_comp]
-        self.active_id = new_comp.id
-
-    @staticmethod
-    def _build_calendar(players: list[str], starting_id: int = 1) -> list[LeagueMatch]:
-        """Ida y vuelta con `round_num` compartido. IDs empiezan en `starting_id`."""
-        base_rounds = round_robin(players)
-        out: list[LeagueMatch] = []
-        idx = starting_id - 1
-        for r, round_matches in enumerate(base_rounds, start=1):
-            for home, away in round_matches:
-                idx += 1
-                out.append(
-                    LeagueMatch(
-                        id=idx, round_num=r, leg=1,
-                        home=home, away=away, status=STATUS_PENDIENTE,
-                    )
-                )
-            for home, away in round_matches:
-                idx += 1
-                out.append(
-                    LeagueMatch(
-                        id=idx, round_num=r, leg=2,
-                        home=away, away=home, status=STATUS_PENDIENTE,
-                    )
-                )
-        return out
-
-    # ---------------- Mutadores ----------------
-
-    def delete_competition(self, comp_id: str) -> None:
-        """Elimina una competición por su id (solo debe llamarlo HomeState
-        tras verificar `AdminState.is_admin`)."""
-        if not comp_id:
-            return
-        self.competitions = [c for c in self.competitions if c.id != comp_id]
-        if self.active_id == comp_id:
-            self.active_id = (
-                self.competitions[-1].id if self.competitions else ""
-            )
+        self._hydrate()
 
     def record_result(
         self, match_id: int, sets_home: int, sets_away: int
     ) -> None:
-        """Cierra un partido y, si es de torneo, propaga el ganador a la siguiente ronda."""
-        target_match: Optional[LeagueMatch] = None
-        target_comp: Optional[Competition] = None
-        for comp in self.competitions:
-            for m in comp.matches:
-                if m.id == match_id:
-                    target_match = m
-                    target_comp = comp
-                    break
-            if target_match is not None:
-                break
+        """Cierra un partido en DB y, si es de torneo, propaga el ganador."""
+        with rx.session() as session:
+            m = session.get(LeagueMatch, match_id)
+            if m is None:
+                return
 
-        if target_match is None or target_comp is None:
+            m.sets_home = sets_home
+            m.sets_away = sets_away
+            m.status = STATUS_FINALIZADO
+
+            # Lógica de ascenso para torneos.
+            if (
+                m.tournament_id is not None
+                and m.next_match_id is not None
+                and m.bracket_position is not None
+            ):
+                winner = m.home if sets_home > sets_away else m.away
+                if winner:
+                    nxt = session.get(LeagueMatch, m.next_match_id)
+                    if nxt is not None:
+                        if m.bracket_position % 2 == 0:
+                            nxt.home = winner
+                        else:
+                            nxt.away = winner
+                        if (
+                            nxt.home
+                            and nxt.away
+                            and not nxt.home.startswith("Ganador Partido")
+                            and not nxt.away.startswith("Ganador Partido")
+                        ):
+                            nxt.is_placeholder = False
+                        session.add(nxt)
+
+            session.add(m)
+            session.commit()
+
+            # Recordamos qué competición tocar para el dashboard.
+            if m.league_id is not None:
+                self.active_competition_id = m.league_id
+                self.active_competition_type = "league"
+            elif m.tournament_id is not None:
+                self.active_competition_id = m.tournament_id
+                self.active_competition_type = "tournament"
+
+        self._hydrate()
+
+    def delete_competition(self, comp_id: int) -> None:
+        """Elimina una competición y sus partidos (sólo invocado tras check admin)."""
+        try:
+            cid = int(comp_id) if not isinstance(comp_id, int) else comp_id
+        except (TypeError, ValueError):
+            return
+        if cid <= 0:
             return
 
-        target_match.sets_home = sets_home
-        target_match.sets_away = sets_away
-        target_match.status = STATUS_FINALIZADO
-        self.active_id = target_comp.id
+        comp = next((c for c in self.competitions if c.id == cid), None)
 
-        # Lógica de ascenso (solo para torneos eliminatorios).
-        if (
-            target_comp.competition_type == "tournament"
-            and target_match.next_match_id is not None
-            and target_match.bracket_position is not None
-        ):
-            winner = (
-                target_match.home if sets_home > sets_away else target_match.away
-            )
-            if winner:
-                next_match = next(
-                    (x for x in target_comp.matches if x.id == target_match.next_match_id),
-                    None,
-                )
-                if next_match is not None:
-                    if target_match.bracket_position % 2 == 0:
-                        next_match.home = winner
-                    else:
-                        next_match.away = winner
-                    # Si ambos slots ya tienen jugadores reales (sin placeholders),
-                    # quitamos el flag is_placeholder.
-                    if (
-                        next_match.home
-                        and next_match.away
-                        and not next_match.home.startswith("Ganador Partido")
-                        and not next_match.away.startswith("Ganador Partido")
-                    ):
-                        next_match.is_placeholder = False
+        with rx.session() as session:
+            if comp is None or comp.competition_type == "league":
+                # Borrar partidos de liga
+                matches_q = session.exec(
+                    select(LeagueMatch).where(LeagueMatch.league_id == cid)
+                ).all()
+                for m in matches_q:
+                    session.delete(m)
+                lg = session.get(League, cid)
+                if lg is not None:
+                    session.delete(lg)
+            if comp is None or comp.competition_type == "tournament":
+                matches_q = session.exec(
+                    select(LeagueMatch).where(LeagueMatch.tournament_id == cid)
+                ).all()
+                for m in matches_q:
+                    session.delete(m)
+                tr = session.get(Tournament, cid)
+                if tr is not None:
+                    session.delete(tr)
+            session.commit()
 
-        # Reasignación para forzar reactividad de Reflex.
-        self.competitions = list(self.competitions)
+        if self.active_competition_id == cid:
+            self.active_competition_id = 0
+            self.active_competition_type = ""
 
-    # ---------------- Helpers internos ----------------
+        self._hydrate()
 
-    def _active(self) -> Optional[Competition]:
-        if not self.active_id:
+    # ---------------- Helpers ----------------
+
+    def _active(self) -> Optional[CompetitionView]:
+        if not self.active_competition_id:
             return None
         return next(
-            (c for c in self.competitions if c.id == self.active_id), None
+            (
+                c
+                for c in self.competitions
+                if c.id == self.active_competition_id
+                and c.competition_type == self.active_competition_type
+            ),
+            None,
         )
 
-    # ---------------- Computed: vista de la competición activa ----------------
+    # ---------------- Computed (vista de la competición activa) ----------------
 
     @rx.var
     def league_name(self) -> str:
@@ -413,7 +506,7 @@ class LeagueState(rx.State):
         return list(c.players) if c else []
 
     @rx.var
-    def matches(self) -> list[LeagueMatch]:
+    def matches(self) -> list[MatchView]:
         c = self._active()
         return list(c.matches) if c else []
 
@@ -507,7 +600,7 @@ class LeagueState(rx.State):
         if not c:
             return []
 
-        by_round: dict[int, dict[str, list[LeagueMatch]]] = {}
+        by_round: dict[int, dict[str, list[MatchView]]] = {}
         for m in c.matches:
             entry = by_round.setdefault(m.round_num, {"ida": [], "vuelta": []})
             (entry["ida"] if m.leg == 1 else entry["vuelta"]).append(m)

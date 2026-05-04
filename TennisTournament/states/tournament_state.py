@@ -71,22 +71,32 @@ class TournamentState(rx.State):
     bracket_columns: list[BracketColumn] = []
 
     async def setup_view(self):
-        """Carga el torneo desde la URL (`?id=...`) y construye las columnas."""
+        """Hidrata desde Postgres y arma la vista del torneo via `?id=N`."""
         # Reset
         self.tournament_name = ""
         self.tournament_subtitle = ""
         self.has_tournament = False
         self.bracket_columns = []
 
-        tournament_id = self.router.page.params.get("id", "")
-        if not tournament_id:
+        tournament_id_param = self.router.page.params.get("id", "")
+        try:
+            tournament_id = int(tournament_id_param) if tournament_id_param else 0
+        except (TypeError, ValueError):
+            return
+        if tournament_id <= 0:
             return
 
         league = await self.get_state(LeagueState)
+        league._hydrate()
         comp = next(
-            (c for c in league.competitions if c.id == tournament_id), None
+            (
+                c
+                for c in league.competitions
+                if c.id == tournament_id and c.competition_type == "tournament"
+            ),
+            None,
         )
-        if not comp or comp.competition_type != "tournament":
+        if not comp:
             return
 
         self.has_tournament = True

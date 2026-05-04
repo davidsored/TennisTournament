@@ -81,8 +81,9 @@ class ScoreboardState(rx.State):
         except (TypeError, ValueError):
             return
 
+        # Hidratar y buscar el partido (los ids son globales en `league_matches`).
         league = await self.get_state(LeagueState)
-        # Buscar el partido en cualquier competición (los IDs son globales).
+        league._hydrate()
         target_comp = None
         target_match = None
         for comp in league.competitions:
@@ -103,11 +104,13 @@ class ScoreboardState(rx.State):
         self.config_sets = target_comp.sets_per_match
         self.match_title = target_comp.name or "Partido"
         # Recordamos el origen del partido para volver al dashboard correcto
-        # tras finalizar (torneo vs liga).
-        self.tournament_id = target_match.tournament_id or ""
+        # tras finalizar (torneo vs liga). `tournament_id` se almacena como
+        # string para mantenerlo simple en el state; se usa tal cual en la URL.
         if target_comp.competition_type == "tournament":
+            self.tournament_id = str(target_comp.id)
             self.match_subtitle = f"Ronda {target_match.round_num}"
         else:
+            self.tournament_id = ""
             leg_label = "Ida" if target_match.leg == 1 else "Vuelta"
             self.match_subtitle = (
                 f"Ronda {target_match.round_num} • {leg_label}"
@@ -292,7 +295,7 @@ class ScoreboardState(rx.State):
 
         if self.league_match_id > 0:
             league = await self.get_state(LeagueState)
-            # Persistir PRIMERO para que el dashboard refleje el resultado actualizado.
+            # Persistir en Postgres ANTES de redirigir.
             league.record_result(
                 match_id=self.league_match_id,
                 sets_home=self.sets_j1,
@@ -303,7 +306,11 @@ class ScoreboardState(rx.State):
                 return rx.redirect(
                     f"/tournament-dashboard?id={self.tournament_id}"
                 )
-            return rx.redirect("/league-dashboard")
+            return rx.redirect(
+                f"/league-dashboard?id={league.active_competition_id}"
+                if league.active_competition_id
+                else "/league-dashboard"
+            )
 
         # Partido fuera de competición: vuelve a la home.
         return rx.redirect("/")

@@ -1,22 +1,31 @@
-"""League model + algoritmo Round Robin (ida y vuelta)."""
+"""League model (rx.Model, table=True) + algoritmo Round Robin (ida y vuelta).
+
+Persistido en Supabase como tabla `leagues`. La lista de jugadores se almacena
+serializada en JSON en `players_json` para evitar una tabla extra.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from uuid import uuid4
+from datetime import datetime, timezone
 
-from .match import Match
-from .player import Player
+import reflex as rx
+import sqlmodel
 
 
-@dataclass
-class League:
-    """Modelo de liga (estructura base — la persistencia vive en LeagueState)."""
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class League(rx.Model, table=True):
+    """Liga (Round Robin) persistida en Postgres."""
+
+    __tablename__ = "leagues"
 
     name: str
-    players: list[Player] = field(default_factory=list)
-    matches: list[Match] = field(default_factory=list)
-    id: str = field(default_factory=lambda: str(uuid4()))
+    sets_per_match: int = 3
+    games_per_set: int = 6
+    players_json: str = "[]"  # JSON list of player names
+    created_at: datetime = sqlmodel.Field(default_factory=_utcnow)
 
 
 # --------------------------- Round Robin ---------------------------
@@ -25,15 +34,7 @@ _BYE = "__BYE__"
 
 
 def round_robin(players: list[str]) -> list[list[tuple[str, str]]]:
-    """Genera el calendario Round Robin (sólo ida).
-
-    Devuelve una lista de rondas; cada ronda es una lista de pares
-    `(local, visitante)`. Si el número de jugadores es impar, añade un "BYE"
-    (descanso) que se omite en la salida final.
-
-    Algoritmo del círculo: fija el primer jugador y rota el resto.
-    Para `n` jugadores genera `n - 1` rondas con `n // 2` partidos por ronda.
-    """
+    """Genera el calendario Round Robin (sólo ida) usando algoritmo del círculo."""
     if len(players) < 2:
         return []
 
@@ -54,18 +55,13 @@ def round_robin(players: list[str]) -> list[list[tuple[str, str]]]:
             if home != _BYE and away != _BYE:
                 round_matches.append((home, away))
         rounds.append(round_matches)
-        # Rota: fija el primero, mueve el último al puesto 1.
         rotation = [rotation[0]] + [rotation[-1]] + rotation[1:-1]
 
     return rounds
 
 
 def round_robin_double(players: list[str]) -> list[list[tuple[str, str, int]]]:
-    """Round Robin a doble vuelta.
-
-    Devuelve rondas; cada elemento es `(local, visitante, leg)` donde
-    `leg=1` es ida y `leg=2` es vuelta (con local/visitante intercambiados).
-    """
+    """Round Robin doble vuelta (ida + vuelta intercambiando local/visitante)."""
     base = round_robin(players)
     out: list[list[tuple[str, str, int]]] = []
     for rnd in base:

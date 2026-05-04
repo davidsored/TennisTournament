@@ -2,6 +2,16 @@
 
 import reflex as rx
 
+# Import explícito de modelos rx.Model para que Alembic los detecte al
+# generar/aplicar migraciones (`reflex db makemigrations`).
+from .models import (  # noqa: F401  - sólo registro de SQLModel metadata
+    Game,
+    League,
+    LeagueMatch,
+    Match,
+    Set,
+    Tournament,
+)
 from .pages.home import home
 from .pages.league import league
 from .pages.league_dashboard import league_dashboard

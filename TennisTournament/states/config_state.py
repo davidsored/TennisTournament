@@ -117,16 +117,11 @@ class ConfigState(rx.State):
                 sets_per_match=self.sets_per_match,
                 games_per_set=self.games_per_set,
             )
-            print(
-                "Liga creada:",
-                {
-                    "name": name,
-                    "players": clean_players,
-                    "matches": len(league.matches),
-                    "rounds": league.total_rounds,
-                },
+            return rx.redirect(
+                f"/league-dashboard?id={league.active_competition_id}"
+                if league.active_competition_id
+                else "/league-dashboard"
             )
-            return rx.redirect("/league-dashboard")
 
         # Torneo eliminatorio (cuadro con BYEs si nº jugadores no es potencia de 2)
         league.setup_tournament(
@@ -135,13 +130,6 @@ class ConfigState(rx.State):
             sets_per_match=self.sets_per_match,
             games_per_set=self.games_per_set,
         )
-        print(
-            "Torneo creado:",
-            {
-                "name": name,
-                "players": clean_players,
-                "matches": len(league.matches),
-                "rounds": league.total_rounds,
-            },
+        return rx.redirect(
+            f"/tournament-dashboard?id={league.active_competition_id}"
         )
-        return rx.redirect(f"/tournament-dashboard?id={league.active_id}")

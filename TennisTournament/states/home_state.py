@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import reflex as rx
 
+from .admin_state import AdminState
 from .league_state import LeagueState, STATUS_FINALIZADO
 
 
@@ -50,6 +51,7 @@ class HomeState(rx.State):
             )
             items.append(
                 {
+                    "id": comp.id,
                     "title": comp.name or "Competición sin nombre",
                     "subtitle": f"{type_label} • {unique_players} jugadores",
                     "icon": icon,
@@ -72,3 +74,23 @@ class HomeState(rx.State):
 
     def select_tab(self, tab: str) -> None:
         self.active_tab = tab
+
+    async def delete_competition(self, comp_id: str):
+        """Borra una competición tras verificar que el usuario es admin.
+
+        El check `AdminState.is_admin` revalida `admin_token` contra la
+        env var `ADMIN_KEY` en el servidor — no basta con setear el
+        localStorage en el cliente.
+        """
+        admin = await self.get_state(AdminState)
+        if not admin.is_admin:
+            return rx.toast.error(
+                "Solo el administrador puede borrar competiciones"
+            )
+        league = await self.get_state(LeagueState)
+        league.delete_competition(comp_id)
+        # Refresca el listado local sin volver a hacer setup_home completo.
+        self.recent_competitions = [
+            item for item in self.recent_competitions if item.get("id") != comp_id
+        ]
+        return rx.toast.success("Competición eliminada")

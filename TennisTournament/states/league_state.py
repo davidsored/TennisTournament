@@ -325,6 +325,17 @@ class LeagueState(rx.State):
 
     # ---------------- Mutadores ----------------
 
+    def delete_competition(self, comp_id: str) -> None:
+        """Elimina una competición por su id (solo debe llamarlo HomeState
+        tras verificar `AdminState.is_admin`)."""
+        if not comp_id:
+            return
+        self.competitions = [c for c in self.competitions if c.id != comp_id]
+        if self.active_id == comp_id:
+            self.active_id = (
+                self.competitions[-1].id if self.competitions else ""
+            )
+
     def record_result(
         self, match_id: int, sets_home: int, sets_away: int
     ) -> None:

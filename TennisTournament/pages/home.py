@@ -2,6 +2,7 @@
 
 Réplica del blueprint Stitch: TopAppBar, bento grid (Liga / Torneo),
 sección de competiciones recientes (dinámica) y BottomNavBar mobile.
+Incluye disparador de modo administrador (clave secreta vía ADMIN_KEY).
 """
 
 from __future__ import annotations
@@ -13,8 +14,11 @@ from ..components.bottom_nav import bottom_nav
 from ..components.material_icon import material_icon
 from ..components.recent_item import recent_item
 from ..components.top_bar import top_bar
+from ..states.admin_state import AdminState
 from ..states.home_state import HomeState
 
+
+# ============================ Bento ============================
 
 def _bento_grid() -> rx.Component:
     return rx.el.section(
@@ -34,8 +38,9 @@ def _bento_grid() -> rx.Component:
     )
 
 
+# ============================ Empty Recent ============================
+
 def _empty_recent() -> rx.Component:
-    """Estado vacío de la sección Recent: invita a crear la primera competición."""
     return rx.el.div(
         material_icon(
             "leaderboard",
@@ -73,11 +78,17 @@ def _empty_recent() -> rx.Component:
     )
 
 
+# ============================ Recent ============================
+
 def _recent_competitions() -> rx.Component:
     return rx.el.section(
-        rx.el.h3(
-            "Competiciones Recientes",
-            class_name="text-headline-lg text-on-surface",
+        rx.box(
+            rx.el.h3(
+                "Competiciones Recientes",
+                class_name="text-headline-lg text-on-surface",
+            ),
+            _admin_trigger(),
+            class_name="flex items-center justify-between",
         ),
         rx.cond(
             HomeState.has_competitions,
@@ -91,6 +102,138 @@ def _recent_competitions() -> rx.Component:
     )
 
 
+# ============================ Admin ============================
+
+def _admin_trigger() -> rx.Component:
+    """Pequeño icono que abre el diálogo de modo administrador."""
+    return rx.el.button(
+        rx.cond(
+            AdminState.is_admin,
+            material_icon(
+                "admin_panel_settings",
+                fill=True,
+                class_name="text-primary text-2xl",
+            ),
+            material_icon(
+                "lock",
+                class_name="text-on-surface-variant text-xl",
+            ),
+        ),
+        on_click=AdminState.open_dialog,
+        aria_label="Modo administrador",
+        class_name=(
+            "w-10 h-10 flex items-center justify-center rounded-full "
+            "hover:bg-surface-container active:bg-surface-container-high "
+            "transition-colors"
+        ),
+    )
+
+
+def _admin_dialog_unauth() -> rx.Component:
+    return rx.box(
+        rx.el.p(
+            "Introduce la clave para desbloquear las acciones de administrador.",
+            class_name="text-body-md text-on-surface-variant mb-sm",
+        ),
+        rx.el.input(
+            placeholder="Clave",
+            type="password",
+            value=AdminState.key_input,
+            on_change=AdminState.set_key_input,
+            class_name=(
+                "w-full bg-surface-container-lowest border border-outline-variant "
+                "rounded min-h-[48px] px-sm py-xs "
+                "focus:outline-none focus:border-primary-container "
+                "focus:ring-2 focus:ring-primary-container/20 transition-colors "
+                "text-on-surface text-body-md placeholder:text-outline"
+            ),
+        ),
+        rx.cond(
+            AdminState.error_message != "",
+            rx.el.p(
+                AdminState.error_message,
+                class_name="text-error text-sm mt-xs",
+            ),
+            rx.fragment(),
+        ),
+        rx.box(
+            rx.dialog.close(
+                rx.el.button(
+                    "Cancelar",
+                    class_name=(
+                        "px-md py-sm rounded text-label-bold "
+                        "text-on-surface-variant hover:bg-surface-container "
+                        "transition-colors"
+                    ),
+                ),
+            ),
+            rx.el.button(
+                "Validar",
+                on_click=AdminState.check_admin_key,
+                class_name=(
+                    "px-md py-sm rounded bg-primary-container "
+                    "text-on-primary-fixed text-label-bold "
+                    "hover:opacity-90 transition-opacity"
+                ),
+            ),
+            class_name="flex justify-end gap-sm mt-md",
+        ),
+        class_name="flex flex-col w-full",
+        width="100%",
+    )
+
+
+def _admin_dialog_authed() -> rx.Component:
+    return rx.box(
+        rx.el.p(
+            "Las acciones de administrador (papelera) están disponibles en cada competición del listado.",
+            class_name="text-body-md text-on-surface-variant mb-md",
+        ),
+        rx.el.button(
+            material_icon("logout", class_name="text-xl"),
+            rx.el.span("Salir del modo admin", class_name="text-label-bold"),
+            on_click=AdminState.logout_admin,
+            class_name=(
+                "w-full bg-error-container text-on-error-container "
+                "rounded-md px-md py-sm flex items-center justify-center gap-xs "
+                "min-h-[48px] hover:opacity-90 transition-opacity"
+            ),
+        ),
+        class_name="flex flex-col gap-sm",
+    )
+
+
+def _admin_dialog() -> rx.Component:
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.dialog.title(
+                rx.cond(
+                    AdminState.is_admin,
+                    "Modo administrador activo",
+                    "Modo administrador",
+                ),
+                class_name="text-headline-lg text-on-surface mb-xs",
+            ),
+            rx.cond(
+                AdminState.is_admin,
+                _admin_dialog_authed(),
+                _admin_dialog_unauth(),
+            ),
+            style={
+                "min_width": "450px",  # Forzamos un mínimo de 450px
+                "max_width": "90vw",   # O el 90% de la pantalla en móviles
+                "padding": "24px",
+                "background_color": "var(--surface-container-lowest)",
+                "border_radius": "12px",
+            },
+        ),
+        open=AdminState.dialog_open,
+        on_open_change=AdminState.set_dialog_open,
+    )
+
+
+# ============================ Page ============================
+
 def home() -> rx.Component:
     return rx.box(
         top_bar(),
@@ -102,6 +245,7 @@ def home() -> rx.Component:
             ),
         ),
         bottom_nav(),
+        _admin_dialog(),
         class_name=(
             "bg-background text-on-background text-body-md antialiased "
             "min-h-screen pb-32 font-sans"

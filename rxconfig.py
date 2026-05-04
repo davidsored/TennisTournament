@@ -5,6 +5,10 @@ desde los componentes mediante utilidades Tailwind (`class_name="bg-primary ..."
 """
 
 import reflex as rx
+import dotenv
+dotenv.load_dotenv()
+
+import reflex as rx
 
 
 TAILWIND_CONFIG = {

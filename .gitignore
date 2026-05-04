@@ -1,5 +1,6 @@
 .web
 .states
+.env
 # ---- Python ----
 __pycache__/
 *.py[cod]

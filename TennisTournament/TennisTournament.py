@@ -9,6 +9,7 @@ from .pages.scoreboard import scoreboard
 from .pages.tournament import tournament
 from .pages.tournament_config import tournament_config
 from .pages.tournament_dashboard import tournament_dashboard
+from .states.admin_state import AdminState
 from .states.config_state import ConfigState
 from .states.home_state import HomeState
 from .states.league_state import LeagueState

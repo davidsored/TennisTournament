@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import reflex as rx
 
+from ..states.admin_state import AdminState
+from ..states.home_state import HomeState
 from .material_icon import material_icon
 
 
@@ -25,12 +27,27 @@ def _status_pill(status, tone) -> rx.Component:
     )
 
 
-def recent_item(comp) -> rx.Component:
-    """Renderiza una competición reciente clicable.
+def _delete_button(comp_id) -> rx.Component:
+    """Papelera (solo visible en modo admin). Elimina la competición."""
+    return rx.cond(
+        AdminState.is_admin,
+        rx.el.button(
+            material_icon("delete", class_name="text-error text-xl"),
+            on_click=HomeState.delete_competition(comp_id).stop_propagation,
+            aria_label="Eliminar competición",
+            class_name=(
+                "w-9 h-9 rounded-full flex items-center justify-center "
+                "hover:bg-error-container/40 active:bg-error-container/60 "
+                "transition-colors"
+            ),
+        ),
+        rx.fragment(),
+    )
 
-    `comp` es un dict reactivo con: title, subtitle, icon, status, tone, href.
-    """
-    card = rx.box(
+
+def recent_item(comp) -> rx.Component:
+    """Renderiza una competición reciente (clicable) con acción admin opcional."""
+    body_link = rx.link(
         rx.box(
             rx.box(
                 material_icon(comp["icon"], class_name="text-primary text-2xl"),
@@ -51,7 +68,17 @@ def recent_item(comp) -> rx.Component:
             ),
             class_name="flex items-center gap-sm",
         ),
-        _status_pill(comp["status"], comp["tone"]),
+        href=comp["href"],
+        class_name="flex-1 block cursor-pointer",
+    )
+
+    return rx.box(
+        body_link,
+        rx.box(
+            _status_pill(comp["status"], comp["tone"]),
+            _delete_button(comp["id"]),
+            class_name="flex items-center gap-xs",
+        ),
         class_name=(
             "bg-surface-container-lowest rounded-md p-sm "
             "flex items-center justify-between "
@@ -60,4 +87,3 @@ def recent_item(comp) -> rx.Component:
             "hover:bg-surface-container-low transition-colors"
         ),
     )
-    return rx.link(card, href=comp["href"], class_name="block cursor-pointer")

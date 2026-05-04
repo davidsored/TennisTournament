@@ -18,10 +18,12 @@ mdurl==0.1.2
 packaging==26.1
 platformdirs==4.9.6
 pluggy==1.6.0
+psycopg2-binary==2.9.12
 pydantic==2.13.3
 pydantic_core==2.46.3
 Pygments==2.20.0
 pytest==9.0.3
+python-dotenv==1.2.2
 python-engineio==4.13.1
 python-multipart==0.0.26
 python-socketio==5.16.1

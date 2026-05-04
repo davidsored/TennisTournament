@@ -5,6 +5,7 @@ desde los componentes mediante utilidades Tailwind (`class_name="bg-primary ..."
 """
 
 import reflex as rx
+import os
 import dotenv
 dotenv.load_dotenv()
 
@@ -125,6 +126,7 @@ TAILWIND_CONFIG = {
 
 config = rx.Config(
     app_name="TennisTournament",
+    db_url=os.getenv("DATABASE_URL"),
     plugins=[
         rx.plugins.SitemapPlugin(),
         rx.plugins.TailwindV4Plugin(config=TAILWIND_CONFIG),

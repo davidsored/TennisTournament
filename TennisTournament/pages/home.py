@@ -53,7 +53,7 @@ def _empty_recent() -> rx.Component:
         rx.el.p(
             "Crea tu primera liga o torneo para verla aparecer aquí.",
             class_name=(
-                "w-full max-w-md mx-auto text-center text-body-md "
+                "w-full text-center text-body-md "
                 "text-on-surface-variant whitespace-normal"
             ),
         ),
@@ -90,13 +90,16 @@ def _recent_competitions() -> rx.Component:
             _admin_trigger(),
             class_name="flex items-center justify-between",
         ),
-        rx.cond(
-            HomeState.has_competitions,
-            rx.box(
-                rx.foreach(HomeState.recent_competitions, recent_item),
-                class_name="grid grid-cols-1 gap-base",
+        rx.box(
+            rx.cond(
+                HomeState.has_competitions,
+                rx.box(
+                    rx.foreach(HomeState.recent_competitions, recent_item),
+                    class_name="grid grid-cols-1 gap-base w-full", 
+                ),
+                _empty_recent(),
             ),
-            _empty_recent(),
+            width="100%", 
         ),
         class_name="flex flex-col gap-sm mt-md",
     )

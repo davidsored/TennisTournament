@@ -310,11 +310,20 @@ class LeagueState(rx.State):
             session.refresh(tournament)
 
             # Fase 1: crear todos los partidos sin next_match_id (DB asigna ids).
+            # Calculamos en paralelo un índice LOCAL por torneo (1, 2, 3…) que se
+            # usa SOLO para las etiquetas visuales. El id de la DB y el índice
+            # local son independientes: el id puede ser global y muy alto, pero
+            # el usuario verá "Partido N" empezando siempre en 1 para cada
+            # torneo nuevo.
             rounds_matches: list[list[LeagueMatch]] = []
+            local_indices: dict[tuple[int, int], int] = {}
+            local_counter = 0
             for r in range(total_rounds):
                 n_in_round = bracket_size // (2 ** (r + 1))
                 this_round: list[LeagueMatch] = []
                 for p in range(n_in_round):
+                    local_counter += 1
+                    local_indices[(r + 1, p)] = local_counter
                     m = LeagueMatch(
                         tournament_id=tournament.id,
                         round_num=r + 1,
@@ -372,15 +381,22 @@ class LeagueState(rx.State):
                 if target.home and target.away:
                     target.is_placeholder = False
 
-            # Fase 5: rellenar slots vacíos con etiquetas "Ganador Partido X".
+            # Fase 5: rellenar slots vacíos con etiquetas "Ganador Partido N"
+            # usando el índice LOCAL del torneo (no el id global de la DB).
             for r in range(1, total_rounds):
                 for p, m in enumerate(rounds_matches[r]):
                     prev_a = rounds_matches[r - 1][p * 2]
                     prev_b = rounds_matches[r - 1][p * 2 + 1]
+                    prev_a_idx = local_indices[
+                        (prev_a.round_num, prev_a.bracket_position or 0)
+                    ]
+                    prev_b_idx = local_indices[
+                        (prev_b.round_num, prev_b.bracket_position or 0)
+                    ]
                     if not m.home:
-                        m.home = f"Ganador Partido {prev_a.id}"
+                        m.home = f"Ganador Partido {prev_a_idx}"
                     if not m.away:
-                        m.away = f"Ganador Partido {prev_b.id}"
+                        m.away = f"Ganador Partido {prev_b_idx}"
 
             # Persistir todos los cambios de Fases 2-5 en una sola transacción.
             session.commit()

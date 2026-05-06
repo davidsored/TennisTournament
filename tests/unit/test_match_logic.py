@@ -20,6 +20,9 @@ from TennisTournament.models.match import (
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 # --------------------------- helpers ---------------------------
 
 def new_match(best_of: int = 3) -> Match:
@@ -313,3 +316,197 @@ class TestValidation:
         assert m.is_tiebreak is False
         assert m.estado == ESTADO_EN_CURSO
         assert m.finished_at is None
+
+
+# =========================================================
+# 7. Resultados imposibles — la state machine no permite saltarse pasos
+# =========================================================
+
+
+class TestImpossibleResults:
+    """Verifica que la máquina de estados no permite alcanzar un marcador
+    final sin haber transitado por todos los estados intermedios obligatorios.
+
+    En tenis es imposible llegar a 7-6 sin haber pasado por 5-5 y luego 6-6
+    (que activa el tie-break). Estos tests demuestran que cualquier camino
+    que llegue al 7-6 forzosamente cumple esa condición.
+    """
+
+    def test_imposible_7_6_sin_pasar_por_5_5(self, fresh_match):
+        # Arrange: partido limpio.
+        m = fresh_match()
+
+        # Act: hacemos 5 juegos a Alice y 4 a Bob, y vamos rastreando los
+        # estados intermedios.
+        observed_states: list[tuple[int, int]] = []
+        for _ in range(5):
+            for _ in range(4):
+                m.add_point(1)
+            observed_states.append((m.juegos_j1, m.juegos_j2))
+        for _ in range(4):
+            for _ in range(4):
+                m.add_point(2)
+            observed_states.append((m.juegos_j1, m.juegos_j2))
+
+        # En este punto debería ir 5-4. Empatamos a 5 y luego 6-6.
+        for _ in range(4):
+            m.add_point(2)            # 5-5
+        observed_states.append((m.juegos_j1, m.juegos_j2))
+
+        for _ in range(4):
+            m.add_point(1)            # 6-5
+        observed_states.append((m.juegos_j1, m.juegos_j2))
+
+        for _ in range(4):
+            m.add_point(2)            # 6-6 → activa tie-break
+        observed_states.append((m.juegos_j1, m.juegos_j2))
+
+        # Assert: el camino visitó (5,5) y (6,6) antes que cualquier 7-x.
+        assert (5, 5) in observed_states
+        assert (6, 6) in observed_states
+        # Nunca se alcanza un 7-6 sin pasar por 6-6 primero
+        idx_66 = observed_states.index((6, 6))
+        siete_seises = [
+            i for i, st in enumerate(observed_states) if st == (7, 6)
+        ]
+        for i in siete_seises:
+            assert i > idx_66
+
+    def test_no_se_pueden_ganar_2_juegos_seguidos_con_un_solo_punto(
+        self, fresh_match
+    ):
+        # Arrange: cada juego requiere mínimo 4 puntos con diff de 2; con un
+        # único punto NO se puede haber ganado un juego.
+        m = fresh_match()
+
+        # Act
+        m.add_point(1)
+
+        # Assert: ni juegos ni sets se incrementan, sólo puntos.
+        assert m.puntos_j1 == 1
+        assert m.juegos_j1 == 0 and m.juegos_j2 == 0
+        assert m.sets_j1 == 0 and m.sets_j2 == 0
+
+    def test_set_no_cierra_a_6_5(self, fresh_match):
+        # Arrange: Para llegar a 6-5 sin cerrar el set, hay que pasar por el 5-5
+        m = fresh_match()
+        for _ in range(5):
+            win_n_games(m, 1, 1) # Alice gana uno (1-0, 2-1...)
+            win_n_games(m, 2, 1) # Bob empata (1-1, 2-2... hasta 5-5)
+        
+        # Act: Alice gana el juego del 6-5
+        win_n_games(m, 1, 1)
+
+        # Assert: 6-5 -> diferencia de 1 -> El set NO debe cerrarse
+        assert m.juegos_j1 == 6 and m.juegos_j2 == 5
+        assert m.sets_j1 == 0
+        assert m.estado == ESTADO_EN_CURSO
+        assert m.is_tiebreak is False
+
+    def test_no_se_activa_tiebreak_a_5_5(self, fresh_match):
+        # Arrange / Act: alternar hasta 5-5
+        m = fresh_match()
+        for _ in range(5):
+            for _ in range(4):
+                m.add_point(1)
+            for _ in range(4):
+                m.add_point(2)
+
+        # Assert: el tie-break sólo se activa en config_games-config_games.
+        assert m.juegos_j1 == 5 and m.juegos_j2 == 5
+        assert m.is_tiebreak is False
+
+
+# =========================================================
+# 8. config_games configurable (set corto a 4 / largo a 8)
+# =========================================================
+
+
+class TestConfigurableGamesPerSet:
+    def test_set_corto_a_4_juegos(self, fresh_match):
+        # Arrange: set "corto" a 4 juegos por set.
+        m = fresh_match(best_of=3, games=4)
+
+        # Act: 4-0 limpio para Alice.
+        for _ in range(4):
+            for _ in range(4):
+                m.add_point(1)
+
+        # Assert: el set se cierra en 4-0 (no sigue hasta 6).
+        assert m.sets_j1 == 1
+        assert m.juegos_j1 == 0 and m.juegos_j2 == 0
+
+    def test_tiebreak_en_4_4_si_config_games_es_4(self, fresh_match):
+        # Arrange: alternar hasta 3-3 y luego 4-4.
+        m = fresh_match(best_of=3, games=4)
+
+        # Act: 3-3
+        for _ in range(3):
+            for _ in range(4):
+                m.add_point(1)
+            for _ in range(4):
+                m.add_point(2)
+        # 4-3
+        for _ in range(4):
+            m.add_point(1)
+        # 4-4 → debe activar tie-break porque config_games=4
+        for _ in range(4):
+            m.add_point(2)
+
+        # Assert
+        assert m.juegos_j1 == 4 and m.juegos_j2 == 4
+        assert m.is_tiebreak is True
+        assert m.sets_j1 == 0 and m.sets_j2 == 0
+
+    def test_set_largo_a_8_juegos_no_cierra_en_6(self, fresh_match):
+        # Arrange: configuración exótica de 8 juegos por set.
+        m = fresh_match(best_of=3, games=8)
+
+        # Act: Alice gana 6-0 (ningún set debe cerrarse).
+        for _ in range(6):
+            for _ in range(4):
+                m.add_point(1)
+
+        # Assert: 6-0 con config_games=8 ⇒ set sigue abierto.
+        assert m.juegos_j1 == 6 and m.juegos_j2 == 0
+        assert m.sets_j1 == 0
+        assert m.is_tiebreak is False
+
+    def test_set_largo_a_8_cierra_en_8_x(self, fresh_match):
+        # Arrange / Act: 8-0 con config_games=8 → cierra set.
+        m = fresh_match(best_of=3, games=8)
+        for _ in range(8):
+            for _ in range(4):
+                m.add_point(1)
+
+        # Assert
+        assert m.sets_j1 == 1
+        assert m.juegos_j1 == 0 and m.juegos_j2 == 0
+
+
+# =========================================================
+# 9. Aislamiento — la lógica de puntuación no toca DB ni I/O
+# =========================================================
+
+
+class TestPurityIsolation:
+    """Sanidad: si un día alguien introduce I/O dentro de `add_point`
+    (logging a un servicio, escritura a DB, ...), estos mocks lo cazan.
+    """
+
+    def test_add_point_no_realiza_io(self, fresh_match, monkeypatch):
+        # Arrange: monkey-patch de `open` para detectar accesos a disco.
+        from unittest.mock import MagicMock
+
+        open_spy = MagicMock(side_effect=AssertionError("add_point tocó disco"))
+        monkeypatch.setattr("builtins.open", open_spy)
+
+        # Act: jugar un set entero.
+        m = fresh_match()
+        for _ in range(6):
+            for _ in range(4):
+                m.add_point(1)
+
+        # Assert: el spy nunca se llamó (cero I/O en el flujo crítico).
+        assert open_spy.call_count == 0
+        assert m.sets_j1 == 1

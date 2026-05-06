@@ -23,6 +23,7 @@ pydantic==2.13.3
 pydantic_core==2.46.3
 Pygments==2.20.0
 pytest==9.0.3
+pytest-cov==7.0.0
 python-dotenv==1.2.2
 python-engineio==4.13.1
 python-multipart==0.0.26

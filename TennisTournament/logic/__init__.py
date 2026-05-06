@@ -1,0 +1,55 @@
+"""Lógica de negocio pura — sin dependencias de Reflex/SQLModel/DB.
+
+Estos módulos contienen el "engine" del producto: matemáticas de tenis,
+algoritmos de emparejamiento, planificación de cuadros, cálculo de
+clasificación y agrupación de fixtures. Son funciones deterministas con
+firmas explícitas y tipos primitivos / dataclasses, así que se prueban
+unitariamente sin necesidad de instanciar State o levantar Postgres.
+"""
+
+from .fixtures import (
+    FixtureLeg,
+    FixtureMatch,
+    FixturePairView,
+    RoundFixtures,
+    group_fixtures,
+)
+from .standings import MatchResult, StandingsRow, compute_standings
+from .tournament_engine import (
+    BYE,
+    PLACEHOLDER_PREFIX,
+    AdvanceTarget,
+    BracketSlot,
+    compute_bracket_size,
+    decide_winner,
+    distribute_byes,
+    next_position,
+    plan_bracket,
+    propagate_winner,
+    winner_advance_side,
+)
+
+__all__ = [
+    # Tournament engine
+    "BYE",
+    "PLACEHOLDER_PREFIX",
+    "AdvanceTarget",
+    "BracketSlot",
+    "compute_bracket_size",
+    "decide_winner",
+    "distribute_byes",
+    "next_position",
+    "plan_bracket",
+    "propagate_winner",
+    "winner_advance_side",
+    # Standings
+    "MatchResult",
+    "StandingsRow",
+    "compute_standings",
+    # Fixtures
+    "FixtureLeg",
+    "FixtureMatch",
+    "FixturePairView",
+    "RoundFixtures",
+    "group_fixtures",
+]

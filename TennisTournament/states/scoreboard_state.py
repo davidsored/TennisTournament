@@ -23,6 +23,7 @@ class ScoreboardState(rx.State):
     player_j1: str = ""
     player_j2: str = ""
     config_sets: int = 3
+    config_games: int = 6  # juegos por set elegidos al crear la competición
 
     match_title: str = "Nuevo partido"
     match_subtitle: str = ""
@@ -64,6 +65,8 @@ class ScoreboardState(rx.State):
         self.match_subtitle = ""
         self.league_match_id = 0
         self.tournament_id = ""
+        self.config_sets = 3
+        self.config_games = 6
         self.puntos_j1 = self.puntos_j2 = 0
         self.juegos_j1 = self.juegos_j2 = 0
         self.sets_j1 = self.sets_j2 = 0
@@ -101,7 +104,11 @@ class ScoreboardState(rx.State):
         self.player_j1 = target_match.home
         self.player_j2 = target_match.away
         self.league_match_id = match_id
-        self.config_sets = target_comp.sets_per_match
+        # CRÍTICO: leer el scoring config DESDE EL PARTIDO (desnormalizado en
+        # league_matches). Si el match guarda 4 juegos por set, el marcador
+        # debe cerrar el set en 4-2/5-3 etc., no en 6-X.
+        self.config_sets = target_match.config_sets or target_comp.sets_per_match
+        self.config_games = target_match.config_games or target_comp.games_per_set
         self.match_title = target_comp.name or "Partido"
         # Recordamos el origen del partido para volver al dashboard correcto
         # tras finalizar (torneo vs liga). `tournament_id` se almacena como
@@ -149,11 +156,18 @@ class ScoreboardState(rx.State):
         self.server_id = snap["server_id"]
 
     def _build_match(self) -> Match:
-        """Reconstruye una instancia transitoria de `Match` con el estado actual."""
+        """Reconstruye una instancia transitoria de `Match` con el estado actual.
+
+        IMPORTANTE: pasamos AMBOS `config_sets` y `config_games` al constructor
+        para que la state machine de scoring (`Match._award_game`) cierre el
+        set en el nº correcto de juegos. Olvidar `config_games` aquí hacía que
+        Match cayera al default `=6` y siempre se jugara a 6 juegos por set.
+        """
         m = Match(
             player_j1=self.player_j1,
             player_j2=self.player_j2,
             config_sets=self.config_sets,
+            config_games=self.config_games,
         )
         m.puntos_j1 = self.puntos_j1
         m.puntos_j2 = self.puntos_j2

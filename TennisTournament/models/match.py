@@ -66,7 +66,8 @@ class Match(rx.Model, table=True):
     player_j2: str
 
     # Configuración
-    config_sets: int = 3  # al mejor de 3 | 5 | N (impar recomendado)
+    config_sets: int = 3   # al mejor de 3 | 5 | N (impar recomendado)
+    config_games: int = 6  # juegos por set (6 estándar; 4 / 5 / 8 también soportados)
 
     # Estado en vivo (enteros internos — el visual se calcula por propiedad)
     puntos_j1: int = 0
@@ -156,11 +157,12 @@ class Match(rx.Model, table=True):
             self.juegos_j2 += 1
 
         g1, g2 = self.juegos_j1, self.juegos_j2
-        # Set cerrado (6+ y diferencia de 2, p.ej. 6-4, 7-5)
-        if max(g1, g2) >= 6 and abs(g1 - g2) >= 2:
+        target = self.config_games  # juegos para cerrar set (configurable)
+        # Set cerrado (target+ y diferencia de 2, p.ej. 6-4, 7-5 con target=6)
+        if max(g1, g2) >= target and abs(g1 - g2) >= 2:
             self._award_set(1 if g1 > g2 else 2)
-        # 6-6 → entra tie-break
-        elif g1 == 6 and g2 == 6:
+        # target-target → entra tie-break
+        elif g1 == target and g2 == target:
             self.is_tiebreak = True
 
     # -- Tie-break --

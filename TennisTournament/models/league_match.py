@@ -39,6 +39,11 @@ class LeagueMatch(rx.Model, table=True):
     sets_home: int = 0
     sets_away: int = 0
 
+    # Configuración de scoring desnormalizada desde la competición padre.
+    # Permite arbitrar el partido sin tener que hacer JOIN con leagues/tournaments.
+    config_sets: int = 3
+    config_games: int = 6
+
     # Tournament-specific
     bracket_position: Optional[int] = None
     next_match_id: Optional[int] = None

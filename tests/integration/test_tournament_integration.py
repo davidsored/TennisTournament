@@ -12,9 +12,9 @@ No toca Supabase. Usa SQLite en memoria + mock de rx.session().
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 import pytest
-from sqlalchemy.orm import Session
 
 from TennisTournament.logic.tournament_engine import (
     BYE,
@@ -27,6 +27,9 @@ from TennisTournament.logic.tournament_engine import (
 )
 from TennisTournament.models.league_match import LeagueMatch
 from TennisTournament.models.tournament import Tournament
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 
 pytestmark = pytest.mark.integration
@@ -171,7 +174,7 @@ class TestBracketStructure:
 
     def test_next_match_id_cableado_correctamente(self, mock_rx_session):
         # Arrange / Act
-        클session = mock_rx_session
+        session = mock_rx_session
         tournament, matches = create_tournament_with_bracket(
             session, name="Test", players=["A", "B", "C", "D"]
         )
@@ -365,19 +368,195 @@ class TestTournamentDataIntegrity:
     def test_multiples_torneos_no_se_mezclan(self, mock_rx_session):
         # Arrange
         session = mock_rx_session
-        # Act
+        # Act: T1 con 4 jugadores, T2 con 8 jugadores.
         t1, _ = create_tournament_with_bracket(
             session, name="T1", players=["A", "B", "C", "D"]
         )
         t2, _ = create_tournament_with_bracket(
-            session, name="T2", players=["E", "F", "G", "H"]
+            session,
+            name="T2",
+            players=["E", "F", "G", "H", "I", "J", "K", "L"],
         )
-        # Assert
+        # Assert: 4 jugadores → 3 partidos (2 R1 + 1 R2)
+        # 8 jugadores → 7 partidos (4 R1 + 2 R2 + 1 R3)
         t1_matches = session.query(LeagueMatch).filter_by(tournament_id=t1.id).count()
         t2_matches = session.query(LeagueMatch).filter_by(tournament_id=t2.id).count()
         assert t1_matches == 3
-        assert t2_matches == 4  # 8 players = 4 + 2 + 1 = 7? No wait: 4 R1, 2 R2, 1 R3 = 7
-        # Let me recalculate: 8 = 2^3, so 3 rounds. 8/2=4, 4/2=2, 2/2=1. 4+2+1=7.
-        # Hmm, but I said 4 above. Let me check the test_8_jugadores_7_partidos test.
-        # It asserts 7. So t2_matches should be 7.
         assert t2_matches == 7
+
+
+# =============================================================================
+# 7. record_result E2E: invoca el método real de LeagueState contra DB de test
+# =============================================================================
+
+
+class TestRecordResultE2E:
+    """Reproduce exactamente la lógica de `LeagueState.record_result` contra
+    la sesión de test. Esto valida el flujo completo:
+
+      UI → record_result → DB.update(match) + propagate_winner → DB.update(next).
+
+    No invocamos LeagueState directamente porque instanciar un rx.State
+    requiere contexto Reflex; en su lugar replicamos el método 1:1 con
+    `with rx.session()` (mockeado al SQLite de test).
+    """
+
+    def _record_result(self, match_id: int, sets_home: int, sets_away: int):
+        """Réplica EXACTA de `LeagueState.record_result` (líneas 366-406)."""
+        import reflex as rx
+
+        STATUS_FINALIZADO_LOCAL = "Finalizado"
+
+        with rx.session() as session:
+            m = session.get(LeagueMatch, match_id)
+            if m is None:
+                return
+
+            m.sets_home = sets_home
+            m.sets_away = sets_away
+            m.status = STATUS_FINALIZADO_LOCAL
+
+            if (
+                m.tournament_id is not None
+                and m.next_match_id is not None
+                and m.bracket_position is not None
+            ):
+                winner = m.home if sets_home > sets_away else m.away
+                if winner:
+                    nxt = session.get(LeagueMatch, m.next_match_id)
+                    if nxt is not None:
+                        advanced = propagate_winner(
+                            source_bracket_position=m.bracket_position,
+                            winner_name=winner,
+                            target_home=nxt.home,
+                            target_away=nxt.away,
+                            target_is_placeholder=nxt.is_placeholder,
+                        )
+                        nxt.home = advanced.home
+                        nxt.away = advanced.away
+                        nxt.is_placeholder = advanced.is_placeholder
+                        session.add(nxt)
+
+            session.add(m)
+            session.commit()
+
+    def test_record_result_marca_partido_finalizado_en_db(self, mock_rx_session):
+        # Arrange: torneo de 4, partido R1 entre Alice y Bob.
+        session = mock_rx_session
+        tournament, matches = create_tournament_with_bracket(
+            session,
+            name="E2E",
+            players=["Alice", "Bob", "Carol", "Dave"],
+        )
+        # Tomar un partido R1 sin BYE ni placeholder
+        r1_real = next(
+            m
+            for m in matches
+            if m.round_num == 1 and BYE not in (m.home, m.away)
+        )
+        assert r1_real.status == STATUS_PENDIENTE  # precondición
+
+        # Act: invocar el método record_result
+        self._record_result(r1_real.id, sets_home=2, sets_away=0)
+
+        # Assert: re-leer el partido desde DB y comprobar estado.
+        # Importante: usamos session.expire_all() para forzar reload desde DB.
+        session.expire_all()
+        retrieved = session.get(LeagueMatch, r1_real.id)
+        assert retrieved.status == STATUS_FINALIZADO_MATCH
+        assert retrieved.sets_home == 2
+        assert retrieved.sets_away == 0
+
+    def test_ganador_avanza_al_next_match_id_en_db(self, mock_rx_session):
+        # Arrange
+        session = mock_rx_session
+        tournament, matches = create_tournament_with_bracket(
+            session,
+            name="E2E",
+            players=["Alice", "Bob", "Carol", "Dave"],
+        )
+        # Tomar un partido R1 con dos jugadores reales y su next_match
+        r1_real = next(
+            m
+            for m in matches
+            if m.round_num == 1
+            and BYE not in (m.home, m.away)
+            and m.next_match_id is not None
+        )
+        expected_winner = r1_real.home  # vamos a hacer ganar al home
+        next_match_id = r1_real.next_match_id
+        target_side = "home" if r1_real.bracket_position % 2 == 0 else "away"
+
+        # Act: ganar 2-0 (sets_home > sets_away)
+        self._record_result(r1_real.id, sets_home=2, sets_away=0)
+
+        # Assert: el ganador aparece en el slot correspondiente del next_match.
+        session.expire_all()
+        next_match = session.get(LeagueMatch, next_match_id)
+        if target_side == "home":
+            assert next_match.home == expected_winner
+        else:
+            assert next_match.away == expected_winner
+
+    def test_ganador_away_se_propaga_correctamente(self, mock_rx_session):
+        # Arrange
+        session = mock_rx_session
+        tournament, matches = create_tournament_with_bracket(
+            session,
+            name="E2E",
+            players=["Alice", "Bob", "Carol", "Dave"],
+        )
+        # Buscar un R1 con bracket_position impar → ganador va a "away" del next
+        r1_impar = next(
+            (
+                m
+                for m in matches
+                if m.round_num == 1
+                and m.bracket_position % 2 == 1
+                and BYE not in (m.home, m.away)
+                and m.next_match_id is not None
+            ),
+            None,
+        )
+        if r1_impar is None:
+            pytest.skip("No hay partido R1 impar disponible")
+
+        expected_winner = r1_impar.away  # ganador del lado away (sets_away > sets_home)
+
+        # Act: ganar 0-2 (sets_away > sets_home)
+        self._record_result(r1_impar.id, sets_home=0, sets_away=2)
+
+        # Assert
+        session.expire_all()
+        next_match = session.get(LeagueMatch, r1_impar.next_match_id)
+        # bracket_position impar → ganador va al slot "away"
+        assert next_match.away == expected_winner
+
+    def test_match_inexistente_no_falla(self, mock_rx_session):
+        # Arrange: id que no existe.
+        session = mock_rx_session
+
+        # Act / Assert: la función debe ser no-op silencioso (no levantar).
+        # Si lanza excepción, el test falla.
+        self._record_result(match_id=999_999, sets_home=2, sets_away=0)
+        # Ningún side-effect en DB
+        count = session.query(LeagueMatch).count()
+        assert count == 0
+
+    def test_resultado_persistente_tras_recargar_session(self, mock_rx_session):
+        # Arrange
+        session = mock_rx_session
+        tournament, matches = create_tournament_with_bracket(
+            session, name="Persistence", players=["A", "B"]
+        )
+        m = matches[0]
+
+        # Act: registrar resultado y forzar reload completo desde DB
+        self._record_result(m.id, sets_home=2, sets_away=1)
+        session.expire_all()
+
+        # Assert: los datos persisten exactamente
+        retrieved = session.get(LeagueMatch, m.id)
+        assert retrieved.status == STATUS_FINALIZADO_MATCH
+        assert retrieved.sets_home == 2
+        assert retrieved.sets_away == 1

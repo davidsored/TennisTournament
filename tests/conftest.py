@@ -59,3 +59,74 @@ def fresh_match():
         )
 
     return make
+
+
+# ---------------------------------------------------------------------------
+# Fixtures de integración — BD SQLite en memoria + mock de rx.session
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="function")
+def test_db_engine():
+    """Engine SQLite en memoria con esquema completo.
+
+    Scope=function: cada test arranca con BD limpia (independencia total).
+    """
+    from sqlalchemy import create_engine
+    from sqlmodel import SQLModel
+
+    # Importar TODOS los modelos para registrarlos en SQLModel.metadata
+    # antes de create_all (orden importante para FKs).
+    from TennisTournament.models.league import League  # noqa: F401
+    from TennisTournament.models.tournament import Tournament  # noqa: F401
+    from TennisTournament.models.league_match import LeagueMatch  # noqa: F401
+    from TennisTournament.models.match import Match  # noqa: F401
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+    )
+    SQLModel.metadata.create_all(engine)
+
+    yield engine
+
+    # Cleanup explícito: drop_all + dispose
+    SQLModel.metadata.drop_all(engine)
+    engine.dispose()
+
+
+@pytest.fixture
+def test_db_session(test_db_engine):
+    """Sesión SQLAlchemy enlazada al engine de test.
+
+    Cada test recibe una sesión nueva sobre una BD vacía.
+    """
+    from sqlalchemy.orm import Session
+
+    session = Session(test_db_engine)
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+@pytest.fixture
+def mock_rx_session(test_db_session, monkeypatch):
+    """Mock de `rx.session()` que redirige a la sesión SQLite de test.
+
+    Reemplaza el context manager de Reflex con uno que devuelve la sesión
+    de test, garantizando que NINGÚN test toca Supabase. Si un test
+    accidentalmente intentara conectar a producción, este fixture lo
+    intercepta.
+    """
+    from contextlib import contextmanager
+    import reflex as rx
+
+    @contextmanager
+    def fake_session():
+        # Yield la misma sesión de test; los commits del código bajo test
+        # quedan en SQLite in-memory y son visibles inmediatamente.
+        yield test_db_session
+
+    monkeypatch.setattr(rx, "session", fake_session)
+    return test_db_session

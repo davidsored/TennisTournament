@@ -5,7 +5,7 @@ bidict==0.23.1
 certifi==2026.4.22
 click==8.3.3
 granian==2.7.4
-greenlet==3.4.0
+greenlet==3.1.1
 h11==0.16.0
 httpcore==1.0.9
 httpx==0.28.1

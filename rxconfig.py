@@ -4,7 +4,6 @@ Los tokens aquí definidos son la ÚNICA fuente de verdad para la UI y se consum
 desde los componentes mediante utilidades Tailwind (`class_name="bg-primary ..."`).
 """
 
-import reflex as rx
 import os
 import dotenv
 dotenv.load_dotenv()
@@ -126,7 +125,7 @@ TAILWIND_CONFIG = {
 
 config = rx.Config(
     app_name="TennisTournament",
-    db_url=os.getenv("DATABASE_URL"),
+    db_url=os.getenv("DATABASE_URL", "sqlite:///reflex.db"),
     plugins=[
         rx.plugins.SitemapPlugin(),
         rx.plugins.TailwindV4Plugin(config=TAILWIND_CONFIG),

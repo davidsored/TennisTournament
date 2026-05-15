@@ -30,5 +30,14 @@ jobs:
       - name: Install Playwright browsers
         run: playwright install --with-deps
 
+      - name: 🚀 Levantar servidor en segundo plano
+        run: |
+          # Iniciamos reflex y lo mandamos al background
+          reflex run --env dev & 
+          
+          # Esperamos a que el puerto 3000 responda (máximo 5 min)
+          timeout 300 bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/127.0.0.1/3000; do sleep 5; done'
+          echo "✅ ¡Servidor de TennisTournament listo!"
+
       - name: Run tests
         run: pytest

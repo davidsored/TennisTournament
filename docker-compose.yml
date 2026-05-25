@@ -1,0 +1,36 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tennistournament:dev
+    container_name: tennistournament-app
+
+    ports:
+      - "3000:3000"
+      - "8000:8000"
+
+    # reflex_web preserva el build de Next entre reinicios; el volumen anónimo
+    # sobre __pycache__ evita filtrar .pyc al host (rompe permisos en Windows).
+    volumes:
+      - .:/app
+      - reflex_web:/app/.web
+      - /app/__pycache__
+
+    # DATABASE_URL apunta a SQLite local para no interferir con Supabase en dev.
+    # WATCHFILES_FORCE_POLLING es necesario para hot-reload en Docker Desktop / Windows.
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////app/reflex.db}
+      PYTHONUNBUFFERED: "1"
+      WATCHFILES_FORCE_POLLING: "true"
+
+    env_file:
+      - path: .env
+        required: false
+
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+
+volumes:
+  reflex_web:

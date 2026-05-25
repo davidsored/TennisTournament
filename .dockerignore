@@ -1,0 +1,42 @@
+# Mantén la imagen pequeña excluyendo del contexto todo lo que no se necesita
+# para construir o ejecutar la aplicación dentro del contenedor.
+
+# Control de versiones
+.git
+.gitignore
+.gitattributes
+
+# Entornos virtuales y artefactos de Python
+.venv
+venv
+env
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.coverage
+htmlcov
+
+# Build del frontend (se regenera dentro del contenedor)
+.web
+node_modules
+
+# Bases de datos locales y secretos
+*.db
+*.sqlite
+*.sqlite3
+.env
+.env.*
+!.env.example
+
+# IDEs y configuración local
+.vscode
+.idea
+*.swp
+.DS_Store
+Thumbs.db
+
+# Docs y assets que no afectan al runtime
+*.md
+!README.md

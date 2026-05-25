@@ -2,9 +2,11 @@
 
 > Gestor profesional de torneos y ligas de tenis — del sorteo al saque final.
 
+[![CI](https://github.com/davidsored/TennisTournament/actions/workflows/ci.yml/badge.svg)](https://github.com/davidsored/TennisTournament/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/tests-138%20passing-brightgreen)](./tests)
-[![Python](https://img.shields.io/badge/python-3.12+-blue)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/python-3.12.3-blue)](https://www.python.org/)
 [![Reflex](https://img.shields.io/badge/reflex-0.9.0-6E56CF)](https://reflex.dev/)
+[![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](./Dockerfile)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 [![Coverage](https://img.shields.io/badge/coverage-logic%20100%25-success)](./tests/unit)
 [![GitHub](https://img.shields.io/badge/github-davidsored%2FTennisTournament-181717?logo=github)](https://github.com/davidsored/TennisTournament)
@@ -47,7 +49,8 @@ Pensada para clubs, organizadores aficionados y profesores que necesitan una her
 - **Migraciones:** Alembic
 - **Estilos:** Tailwind CSS v4 con sistema de diseño "Advantage" (Material 3 + tipografía Inter)
 - **Testing:** Pytest + pytest-cov + Playwright + pytest-playwright
-- **Deployment:** Reflex Hosting / Docker
+- **CI:** GitHub Actions (unit + integration en cada push y PR sobre `master`)
+- **Deployment:** Reflex Hosting / Docker (Dockerfile + docker-compose para desarrollo local)
 
 ---
 
@@ -129,6 +132,27 @@ reflex run
 
 La app queda disponible en **http://localhost:3000** (frontend) y **http://localhost:8000** (backend WS).
 
+### 🐳 Setup con Docker (alternativa)
+
+Si prefieres no instalar Python ni Node localmente, hay un `Dockerfile` y un `docker-compose.yml` listos para desarrollo con hot-reload:
+
+```bash
+# Construye la imagen (Python 3.12.3-slim + Node.js 20 + dependencias) y arranca la app
+docker compose up --build
+
+# Arranques posteriores (sin reconstruir)
+docker compose up
+
+# Detener
+docker compose down
+```
+
+Detalles:
+- **Puertos** `3000` (frontend Next.js) y `8000` (backend WS) mapeados al host.
+- **Hot-reload activo**: el código del repo se monta como volumen, así los cambios locales se reflejan al instante dentro del contenedor (se usa `WATCHFILES_FORCE_POLLING` para que funcione bajo Docker Desktop en Windows/macOS).
+- **`DATABASE_URL` por defecto** apunta a SQLite dentro del contenedor (`sqlite:////app/reflex.db`) para no interferir con Supabase. Puedes sobreescribirla con un `.env` en la raíz o exportándola antes de `docker compose up`.
+- **Volumen nombrado `reflex_web`** preserva el build de Next entre reinicios y evita recompilar el frontend cada vez.
+
 ---
 
 ## 🧪 Ejecución de los tests
@@ -151,6 +175,10 @@ pytest tests/e2e -v                      # headless (CI)
 
 > 📖 Más detalles E2E en [`README_E2E.md`](./README_E2E.md) y testing general en [`TESTING.md`](./TESTING.md).
 
+### ⚙️ Integración continua
+
+Cada `push` y cada `pull request` contra `master` dispara el workflow [`.github/workflows/ci.yml`](./.github/workflows/ci.yml), que sobre Ubuntu y Python 3.12.3 instala las dependencias y ejecuta la suite `pytest tests/unit tests/integration`. El badge **CI** en la cabecera refleja el estado del último build.
+
 ---
 
 ## 📂 Estructura del proyecto
@@ -172,6 +200,10 @@ tests/
 └── e2e/
     ├── pages/          ← Page Objects (POM)
     └── specs/          ← Tests Playwright
+
+.github/workflows/      ← CI: instala deps y corre unit + integration
+Dockerfile              ← Imagen Python 3.12.3-slim + Node 20 + Reflex
+docker-compose.yml      ← Stack de desarrollo con hot-reload y SQLite
 ```
 
 ---

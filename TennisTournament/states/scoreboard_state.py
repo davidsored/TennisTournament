@@ -35,6 +35,9 @@ class ScoreboardState(rx.State):
     # Lo usamos para volver al dashboard correcto al finalizar.
     tournament_id: str = ""
 
+    # True si el partido es "amistoso" (creado desde /casual-match sin DB).
+    is_casual: bool = False
+
     # ---- Estado en vivo (espejo de Match) ----
     puntos_j1: int = 0
     puntos_j2: int = 0
@@ -56,15 +59,15 @@ class ScoreboardState(rx.State):
 
     # ---------------- Lifecycle (on_load) ----------------
 
-    async def setup_scoreboard(self):
-        """Reset del marcador y, si la URL trae `?match_id=N`, carga ese partido."""
-        # Reset base
+    def _reset_all(self) -> None:
+        """Resetea el marcador a un estado limpio."""
         self.player_j1 = ""
         self.player_j2 = ""
         self.match_title = "Nuevo partido"
         self.match_subtitle = ""
         self.league_match_id = 0
         self.tournament_id = ""
+        self.is_casual = False
         self.config_sets = 3
         self.config_games = 6
         self.puntos_j1 = self.puntos_j2 = 0
@@ -76,7 +79,54 @@ class ScoreboardState(rx.State):
         self.history = []
         self.server_id = 1
 
-        match_id_param = self.router.page.params.get("match_id", "")
+    async def setup_scoreboard(self):
+        """Hidrata el marcador desde los query params de la URL.
+
+        Soporta tres modos:
+          - `?match_id=N` → partido de liga/torneo (consulta DB vía LeagueState).
+          - `?casual=1&p1=…&p2=…&sets=…&games=…` → partido amistoso.
+          - Sin params → marcador vacío.
+
+        Persistencia ante refresco: si los parámetros casuales coinciden con el
+        partido ya cargado, NO reseteamos para conservar puntos/juegos/sets.
+        """
+        params = self.router.page.params
+
+        # --- Modo casual: hidratación desde URL ---
+        if params.get("casual", "") == "1":
+            p1 = params.get("p1", "").strip() or "Jugador 1"
+            p2 = params.get("p2", "").strip() or "Jugador 2"
+            try:
+                sets = int(params.get("sets", "3"))
+                games = int(params.get("games", "6"))
+            except (TypeError, ValueError):
+                sets, games = 3, 6
+
+            # Refresco con la misma configuración → preserva el progreso.
+            same_setup = (
+                self.is_casual
+                and self.player_j1 == p1
+                and self.player_j2 == p2
+                and self.config_sets == sets
+                and self.config_games == games
+            )
+            if same_setup:
+                return
+
+            self._reset_all()
+            self.player_j1 = p1
+            self.player_j2 = p2
+            self.config_sets = sets
+            self.config_games = games
+            self.match_title = "Partido Amistoso"
+            self.match_subtitle = f"Al mejor de {sets} sets · {games} juegos"
+            self.is_casual = True
+            return
+
+        # --- Modo competición (liga/torneo) ---
+        self._reset_all()
+
+        match_id_param = params.get("match_id", "")
         if not match_id_param:
             return
         try:

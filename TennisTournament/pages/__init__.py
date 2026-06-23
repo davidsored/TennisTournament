@@ -5,6 +5,7 @@ from .tournament import tournament
 from .tournament_config import tournament_config
 from .league_dashboard import league_dashboard
 from .tournament_dashboard import tournament_dashboard
+from .casual_match import casual_match
 
 __all__ = [
     "home",
@@ -14,4 +15,5 @@ __all__ = [
     "tournament_config",
     "league_dashboard",
     "tournament_dashboard",
+    "casual_match",
 ]

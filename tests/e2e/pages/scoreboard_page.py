@@ -99,6 +99,22 @@ class ScoreboardPage(BasePage):
 
     # ----------------- Verificaciones -----------------
 
+    def expect_player_names(self, j1: str, j2: str) -> None:
+        """Verifica que ambos nombres se renderizan en el marcador.
+
+        Cada jugador se pinta en su propia `_player_row` dentro de un span con
+        el nombre. Usamos `get_by_text(exact=True)` para evitar colisiones con
+        otros textos de la página.
+        """
+        expect(self.page.get_by_text(j1, exact=True).first).to_be_visible(
+            timeout=15_000
+        )
+        expect(self.page.get_by_text(j2, exact=True).first).to_be_visible()
+
+    def expect_match_title(self, expected: str) -> None:
+        """El header del marcador muestra `match_title` (e.g. "Partido Amistoso")."""
+        expect(self.page.get_by_text(expected, exact=False).first).to_be_visible()
+
     def expect_finished(self) -> None:
         # Banner "¡Partido Finalizado!" sólo aparece tras cierre real del match.
         expect(

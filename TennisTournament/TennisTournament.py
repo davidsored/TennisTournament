@@ -12,6 +12,7 @@ from .models import (  # noqa: F401  - sólo registro de SQLModel metadata
     Set,
     Tournament,
 )
+from .pages.casual_match import casual_match
 from .pages.home import home
 from .pages.league import league
 from .pages.league_dashboard import league_dashboard
@@ -20,6 +21,7 @@ from .pages.tournament import tournament
 from .pages.tournament_config import tournament_config
 from .pages.tournament_dashboard import tournament_dashboard
 from .states.admin_state import AdminState
+from .states.casual_match_state import CasualMatchState
 from .states.config_state import ConfigState
 from .states.home_state import HomeState
 from .states.league_state import LeagueState
@@ -69,4 +71,10 @@ app.add_page(
     route="/tournament-dashboard",
     title="Torneo · Cuadro",
     on_load=TournamentState.setup_view,
+)
+app.add_page(
+    casual_match,
+    route="/casual-match",
+    title="Partido Amistoso",
+    on_load=CasualMatchState.setup_page,
 )

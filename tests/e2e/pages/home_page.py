@@ -34,6 +34,14 @@ class HomePage(BasePage):
         self.page.wait_for_timeout(1000)  # hidratación tras navegar
         self.wait_for_hydration()
 
+    def click_casual_match(self) -> None:
+        """Pincha el bento card 'Partido Amistoso' (acceso directo sin liga)."""
+        title = self.page.get_by_text("Partido Amistoso", exact=True).first
+        link = title.locator("xpath=ancestor::a[1]")
+        link.click()
+        self.page.wait_for_timeout(1000)
+        self.wait_for_hydration()
+
     # ------------------------ Verificaciones ------------------------
 
     def expect_loaded(self) -> None:

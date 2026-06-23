@@ -34,7 +34,13 @@ def _bento_grid() -> rx.Component:
             icon="emoji_events",
             href="/tournament-config?type=tournament",
         ),
-        class_name="grid grid-cols-1 md:grid-cols-2 gap-sm",
+        bento_card(
+            title="Partido Amistoso",
+            subtitle="(Sin competición)",
+            icon="sports_tennis",
+            href="/casual-match",
+        ),
+        class_name="grid grid-cols-1 md:grid-cols-3 gap-sm",
     )
 
 

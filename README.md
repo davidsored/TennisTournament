@@ -3,7 +3,8 @@
 > Gestor profesional de torneos y ligas de tenis — del sorteo al saque final.
 
 [![CI](https://github.com/davidsored/TennisTournament/actions/workflows/ci.yml/badge.svg)](https://github.com/davidsored/TennisTournament/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-138%20passing-brightgreen)](./tests)
+[![E2E](https://github.com/davidsored/TennisTournament/actions/workflows/e2e.yml/badge.svg)](https://github.com/davidsored/TennisTournament/actions/workflows/e2e.yml)
+[![Tests](https://img.shields.io/badge/tests-165%20passing-brightgreen)](./tests)
 [![Python](https://img.shields.io/badge/python-3.12.3-blue)](https://www.python.org/)
 [![Reflex](https://img.shields.io/badge/reflex-0.9.0-6E56CF)](https://reflex.dev/)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](./Dockerfile)
@@ -14,6 +15,16 @@
 <p align="center">
   <img src="assets/screenshots/home.png" alt="Dashboard de CourtManager" width="800">
 </p>
+
+---
+
+## 🆕 Novedades
+
+> Cambios recientes — detalle completo en [CHANGELOG.md](./CHANGELOG.md).
+
+- 🎾 **Partido Amistoso**: marcador rápido sin liga ni torneo, accesible desde el Home. La configuración viaja en la URL para sobrevivir refrescos.
+- 🐳 **Docker listo para usar**: `Dockerfile` + `docker-compose.yml` con hot-reload para arrancar el stack en un comando.
+- ⚙️ **CI en GitHub Actions**: unit + integration en cada push/PR y un workflow E2E nightly con Playwright.
 
 ---
 
@@ -29,6 +40,7 @@ Pensada para clubs, organizadores aficionados y profesores que necesitan una her
 | --- | --- |
 | 🏆 **Ligas (Round Robin)** | Genera el calendario completo ida y vuelta con el algoritmo del círculo. Tabla de clasificación con desempates por sets y orden alfabético. |
 | 🎯 **Torneos eliminatorios** | Cuadros con sembrado aleatorio, distribución de BYEs (nunca se enfrentan entre sí), propagación automática del ganador a la siguiente ronda. |
+| 🎾 **Partido Amistoso** | Marcador rápido sin crear competición: dos nombres, formato (sets / juegos) y a jugar. La configuración viaja en la URL para sobrevivir refrescos. |
 | ⏱️ **Marcador en vivo** | Máquina de estados completa: 0 → 15 → 30 → 40, deuce, ventaja, tie-break (configurable), partidos al mejor de N sets / M juegos. |
 | 💾 **Persistencia robusta** | Postgres (Supabase) en producción, SQLite en local. Migraciones gestionadas con Alembic. |
 | 🌗 **Modo administrador** | Acciones destructivas (borrado de competiciones) protegidas por clave; sesión persistida vía `LocalStorage`. |
@@ -39,6 +51,17 @@ Pensada para clubs, organizadores aficionados y profesores que necesitan una her
   <img src="assets/screenshots/torneo.png" alt="Bracket eliminatorio con conectores y propagación de ganadores" width="48%">
 </p>
 <p align="center"><em>Dashboard de liga (Round Robin) y cuadro eliminatorio en acción.</em></p>
+
+<!-- TODO capturas v0.2.0: generar y commitear los archivos siguientes -->
+<!-- - assets/screenshots/casual_form.png        → formulario /casual-match rellenado -->
+<!-- - assets/screenshots/casual_scoreboard.png  → marcador "Partido Amistoso" con dos nombres -->
+<!-- - assets/screenshots/home.png               → re-capturar con el bento de 3 columnas -->
+<p align="center">
+  <img src="assets/screenshots/casual_form.png" alt="Formulario de Partido Amistoso" width="48%">
+  &nbsp;
+  <img src="assets/screenshots/casual_scoreboard.png" alt="Marcador en vivo de un partido amistoso" width="48%">
+</p>
+<p align="center"><em>Partido Amistoso: del formulario al marcador en dos clics.</em></p>
 
 ---
 
@@ -54,17 +77,17 @@ Pensada para clubs, organizadores aficionados y profesores que necesitan una her
 
 ---
 
-## 🧪 Pirámide de Testing — 138 tests automatizados
+## 🧪 Pirámide de Testing — 165 tests automatizados
 
 CourtManager se construye sobre una suite de tests con **3 niveles de cobertura** que protegen el dominio del juego, la persistencia y el flujo de usuario.
 
 ```
        ╱╲
-      ╱E2E╲          3 tests Playwright (flujos UI completos)
+      ╱E2E╲          5 tests Playwright (flujos UI completos)
      ╱──────╲
-    ╱  Integ ╲       28 tests con BD SQLite en memoria
+    ╱  Integ ╲      53 tests con BD SQLite en memoria + states de Reflex
    ╱──────────╲
-  ╱   Unit     ╲    107 tests puros (sin DB, sin red, sin UI)
+  ╱   Unit     ╲   107 tests puros (sin DB, sin red, sin UI)
  ╱──────────────╲
 ```
 
@@ -83,14 +106,16 @@ Cada test arranca con una **BD SQLite en memoria** limpia (fixture `test_db_engi
 
 - **Ligas** (`test_league_integration.py`): creación de `League`, generación del calendario Round Robin, persistencia de `config_games` en cada `LeagueMatch`, lectura de standings desde DB → `MatchView` → `compute_standings`.
 - **Torneos** (`test_tournament_integration.py`): bracket completo en BD, cableado de `next_match_id`, finalización automática de BYEs, **propagación E2E del ganador**: réplica 1:1 del método `LeagueState.record_result` que verifica que el winner aparece en el slot correcto del partido siguiente tras cerrar el partido en BD.
+- **Partido Amistoso** (`test_casual_integration.py`): instancia el `CasualMatchState` y valida steppers (sets impares 1–9, juegos 1–12), `start_match` emitiendo el `rx.redirect` con la URL `/scoreboard?casual=1&p1=…&p2=…&sets=…&games=…`, URL-encoding de espacios/acentos y rechazo (`rx.toast.error`) ante nombres vacíos o duplicados case-insensitive.
 
 ### 🟣 E2E (`tests/e2e/`) — Flujo de usuario con Playwright
 
-Tres flujos críticos validados sobre la aplicación real corriendo en `localhost:3000`. Patrón **Page Object Model** estricto, locators 100 % user-centric (`get_by_role`, `get_by_text`, `get_by_placeholder`):
+Cinco flujos críticos validados sobre la aplicación real corriendo en `localhost:3000`. Patrón **Page Object Model** estricto, locators 100 % user-centric (`get_by_role`, `get_by_text`, `get_by_placeholder`):
 
 - **Flow A — Liga**: crear liga con 3 jugadores y 4 juegos por set, verificar que aparecen todos en standings.
 - **Flow B — Torneo + avance del ganador**: crear cuadro de 4, ganar el primer partido, verificar visualmente que el ganador avanza a la final.
 - **Flow C — Persistencia de Estado**: Validación de que las competiciones creadas aparecen y persisten correctamente en el Dashboard de "Competiciones Recientes" tras la navegación.
+- **Flow D — Partido Amistoso** (`test_casual_match_spec.py`): entrar al bento card, rellenar nombres y formato, comenzar partido y verificar que la URL contiene los query params (`casual=1&sets=…&games=…`) y que el marcador renderiza ambos jugadores; un segundo test valida que sumar puntos no rompe el contexto casual.
 
 Cada test E2E captura **screenshot automático** en caso de fallo (hook `pytest_runtest_makereport`).
 
@@ -190,20 +215,24 @@ TennisTournament/
 │   ├── standings.py
 │   └── fixtures.py
 ├── models/             ← rx.Model + SQLModel (League, Tournament, Match…)
-├── states/             ← rx.State (LeagueState, ScoreboardState…)
-├── pages/              ← Páginas Reflex (home, scoreboard, dashboards…)
+├── states/             ← rx.State (LeagueState, ScoreboardState, CasualMatchState…)
+├── pages/              ← Páginas Reflex (home, scoreboard, casual_match, dashboards…)
 └── components/         ← UI reutilizable (top bar, bento cards, brackets…)
 
 tests/
 ├── unit/               ← 107 tests sin dependencias externas
-├── integration/        ← 28 tests con SQLite en memoria
+├── integration/        ← 53 tests con SQLite en memoria + states de Reflex
+│   ├── test_league_integration.py
+│   ├── test_tournament_integration.py
+│   └── test_casual_integration.py
 └── e2e/
-    ├── pages/          ← Page Objects (POM)
-    └── specs/          ← Tests Playwright
+    ├── pages/          ← Page Objects (POM), incl. CasualPage
+    └── specs/          ← Tests Playwright (incl. test_casual_match_spec.py)
 
-.github/workflows/      ← CI: instala deps y corre unit + integration
+.github/workflows/      ← CI (unit+integration) y E2E nightly con Playwright
 Dockerfile              ← Imagen Python 3.12.3-slim + Node 20 + Reflex
 docker-compose.yml      ← Stack de desarrollo con hot-reload y SQLite
+CHANGELOG.md            ← Historial de cambios (Keep a Changelog + SemVer)
 ```
 
 ---

@@ -1,0 +1,86 @@
+name: E2E (Playwright)
+
+# Pesado: levanta Reflex, instala Chromium y corre los specs de Playwright.
+# Lo dejamos en cron nocturno + lanzable a mano desde la pestaña "Actions".
+on:
+  schedule:
+    - cron: "0 4 * * *"  # 04:00 UTC cada día (~05:00 CET / 06:00 CEST)
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12.3
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.3"
+          cache: "pip"
+
+      - name: Set up Node.js 20
+        # Reflex compila el frontend con Next.js; sin Node, el build del .web/ falla.
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright Chromium
+        run: playwright install --with-deps chromium
+
+      - name: Start Reflex in background
+        # `reflex run --env dev` arranca frontend (3000) + backend (8000).
+        # Redirigimos logs a un archivo para subirlos como artifact si algo falla.
+        env:
+          DATABASE_URL: sqlite:///reflex.db
+        run: |
+          nohup reflex run --env dev > reflex.log 2>&1 &
+          echo "REFLEX_PID=$!" >> $GITHUB_ENV
+
+      - name: Wait for frontend to be ready
+        # Bucle de curl con timeout duro: si en 5 min Reflex no responde 200 en
+        # localhost:3000, fallamos rápido en vez de dejar colgado el job.
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf -o /dev/null http://localhost:3000/; then
+              echo "Reflex frontend listo tras ${i} intentos."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Reflex no respondió en 5 minutos."
+          tail -100 reflex.log || true
+          exit 1
+
+      - name: Run E2E tests
+        run: pytest tests/e2e -v
+
+      - name: Stop Reflex
+        if: always()
+        run: |
+          if [ -n "${REFLEX_PID:-}" ]; then
+            kill "${REFLEX_PID}" 2>/dev/null || true
+          fi
+          pkill -f "reflex run" 2>/dev/null || true
+          pkill -f granian 2>/dev/null || true
+
+      - name: Upload failure artifacts
+        # Los specs guardan capturas como `debug_fail_*.png` / `debug_*.png` cuando
+        # algo se rompe; las subimos junto al log de Reflex para depurar en remoto.
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-debug
+          path: |
+            debug_*.png
+            reflex.log
+          if-no-files-found: ignore
+          retention-days: 7

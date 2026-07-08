@@ -36,6 +36,13 @@ jobs:
       - name: Install Playwright Chromium
         run: playwright install --with-deps chromium
 
+      - name: Apply database migrations
+        # El runner parte de una SQLite vacía; sin esto, el backend falla con
+        # "no such table: leagues" al crear liga/torneo desde los tests.
+        env:
+          DATABASE_URL: sqlite:///reflex.db
+        run: reflex db migrate
+
       - name: Start Reflex in background
         # `reflex run --env dev` arranca frontend (3000) + backend (8000).
         # Redirigimos logs a un archivo para subirlos como artifact si algo falla.

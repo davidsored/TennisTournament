@@ -12,6 +12,37 @@ class ScoreboardPage(BasePage):
 
     # ----------------- Acciones -----------------
 
+    def choose_server(self, player_num: int) -> None:
+        """Selecciona quién saca primero en el modal '¿Quién comienza sacando?'.
+
+        El modal aparece antes del primer punto de cualquier partido nuevo y
+        bloquea el resto de la página hasta elegir. Los dos botones del
+        diálogo siguen el orden J1 (arriba) / J2 (abajo).
+        """
+        dialog = self.page.get_by_role("dialog")
+        dialog.wait_for(state="visible", timeout=10_000)
+        dialog.get_by_role("button").nth(player_num - 1).click()
+        # El modal se cierra al elegir; esperar a que desaparezca.
+        dialog.wait_for(state="hidden", timeout=10_000)
+
+    def choose_server_if_asked(self, player_num: int = 1) -> None:
+        """Como `choose_server`, pero tolera que el modal no aparezca.
+
+        Útil en partidos con progreso previo o con sacador ya persistido,
+        donde el modal no debe mostrarse.
+        """
+        try:
+            self.page.get_by_role("dialog").wait_for(
+                state="visible", timeout=5_000
+            )
+        except Exception:
+            return
+        self.choose_server(player_num)
+
+    def expect_no_server_modal(self) -> None:
+        """Verifica que el modal de saque NO está visible (p.ej. tras refresh)."""
+        expect(self.page.get_by_role("dialog")).not_to_be_visible()
+
     def add_point_to_j1(self) -> None:
         """Suma un punto al jugador 1 (botón izquierdo).
 
@@ -47,6 +78,8 @@ class ScoreboardPage(BasePage):
         """
         # Espera inicial para que el scoreboard hidrate por completo.
         self.page.wait_for_timeout(1000)
+        # Resolver el modal de saque si el partido aún no tiene sacador.
+        self.choose_server_if_asked(player_num)
         for _ in range(max_clicks):
             # ¿Ya está finalizado?
             if self._is_finished():

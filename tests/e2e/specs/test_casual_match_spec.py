@@ -68,9 +68,13 @@ def test_casual_match_supports_scoring_after_start(page, base_url):
     casual.set_player_j2("Bob")
     casual.submit()
 
-    # Act: sumar un punto a cada jugador; el state debe aceptarlos sin error.
+    # Act: el modal "¿Quién comienza sacando?" debe aparecer antes del
+    # primer punto; elegimos a Bob (J2) como primer sacador.
     scoreboard = ScoreboardPage(page, base_url)
     scoreboard.expect_player_names("Alice", "Bob")
+    scoreboard.choose_server(player_num=2)
+
+    # Act: sumar un punto a cada jugador; el state debe aceptarlos sin error.
     scoreboard.add_point_to_j1()
     page.wait_for_timeout(200)
     scoreboard.add_point_to_j2()
@@ -82,3 +86,10 @@ def test_casual_match_supports_scoring_after_start(page, base_url):
     assert (
         page.get_by_text("¡Partido Finalizado!", exact=False).count() == 0
     )
+
+    # Assert: al refrescar un partido con progreso, el modal de saque NO
+    # vuelve a aparecer (la elección vive en el estado de sesión).
+    page.reload()
+    page.wait_for_timeout(1500)
+    scoreboard.expect_player_names("Alice", "Bob")
+    scoreboard.expect_no_server_modal()

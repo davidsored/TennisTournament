@@ -65,6 +65,10 @@ def _round_label(remaining: int) -> str:
 class TournamentState(rx.State):
     """Vista del Tournament Dashboard."""
 
+    # ID del torneo mostrado (0 = ninguno). Lo consume el diálogo de
+    # edición de participantes para saber sobre qué competición operar.
+    tournament_id: int = 0
+
     tournament_name: str = ""
     tournament_subtitle: str = ""
     has_tournament: bool = False
@@ -72,7 +76,19 @@ class TournamentState(rx.State):
 
     async def setup_view(self):
         """Hidrata desde Postgres y arma la vista del torneo via `?id=N`."""
+        league = await self.get_state(LeagueState)
+        league._hydrate()
+        self._build_view(league)
+
+    def _build_view(self, league: LeagueState) -> None:
+        """Arma la vista del cuadro desde un `LeagueState` YA hidratado.
+
+        Separado de `setup_view` para que flujos que acaban de mutar y
+        re-hidratar (p.ej. renombrar participante) refresquen el bracket
+        sin pagar una segunda hidratación completa de la BD.
+        """
         # Reset
+        self.tournament_id = 0
         self.tournament_name = ""
         self.tournament_subtitle = ""
         self.has_tournament = False
@@ -86,8 +102,6 @@ class TournamentState(rx.State):
         if tournament_id <= 0:
             return
 
-        league = await self.get_state(LeagueState)
-        league._hydrate()
         comp = next(
             (
                 c
@@ -100,6 +114,7 @@ class TournamentState(rx.State):
             return
 
         self.has_tournament = True
+        self.tournament_id = comp.id
         self.tournament_name = comp.name
         n_players = len([p for p in comp.players if p.strip()])
         self.tournament_subtitle = f"Cuadro principal · {n_players} jugadores"

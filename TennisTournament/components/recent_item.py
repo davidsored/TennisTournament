@@ -27,13 +27,15 @@ def _status_pill(status, tone) -> rx.Component:
     )
 
 
-def _delete_button(comp_id) -> rx.Component:
+def _delete_button(comp_id, comp_type) -> rx.Component:
     """Papelera (solo visible en modo admin). Elimina la competición."""
     return rx.cond(
         AdminState.is_admin,
         rx.el.button(
             material_icon("delete", class_name="text-error text-xl"),
-            on_click=HomeState.delete_competition(comp_id).stop_propagation,
+            on_click=HomeState.delete_competition(
+                comp_id, comp_type
+            ).stop_propagation,
             aria_label="Eliminar competición",
             class_name=(
                 "w-9 h-9 rounded-full flex items-center justify-center "
@@ -76,7 +78,7 @@ def recent_item(comp) -> rx.Component:
         body_link,
         rx.box(
             _status_pill(comp["status"], comp["tone"]),
-            _delete_button(comp["id"]),
+            _delete_button(comp["id"], comp["type"]),
             class_name="flex items-center gap-xs",
         ),
         class_name=(

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import reflex as rx
 
+from ..components.server_selection_dialog import server_selection_dialog
 from ..states.scoreboard_state import ScoreboardState
 
 
@@ -410,6 +411,7 @@ def scoreboard() -> rx.Component:
             ),
         ),
         _finish_footer(),
+        server_selection_dialog(),
         class_name=(
             "bg-surface text-on-surface antialiased min-h-screen "
             "flex flex-col relative font-sans "

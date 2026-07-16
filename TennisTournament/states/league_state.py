@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import select
 
 from ..logic.fixtures import FixtureMatch, group_fixtures
+from ..logic.players import plan_rename
 from ..logic.standings import MatchResult, compute_standings
 from ..logic.validation import validate_competition_config
 from ..logic.tournament_engine import (
@@ -415,11 +416,63 @@ class LeagueState(rx.State):
 
         self._hydrate()
 
-    async def delete_competition(self, comp_id: int):
+    def rename_player(
+        self, comp_id: int, comp_type: str, old_name: str, new_name: str
+    ) -> str | None:
+        """Renombra un participante en toda la competición. Transaccional.
+
+        Actualiza `players_json` de la League/Tournament y los campos
+        `home`/`away` de todos sus `league_matches` por igualdad EXACTA
+        (así nunca toca placeholders "Ganador Partido N" ni BYEs). Un solo
+        commit al final: o se aplica todo o no se aplica nada.
+
+        Devuelve `None` si OK o un mensaje de error listo para la UI.
+        """
+        model = League if comp_type == "league" else Tournament
+
+        with rx.session() as session:
+            comp = session.get(model, comp_id)
+            if comp is None:
+                return "Competición no encontrada"
+
+            players = _safe_players(comp.players_json)
+            new_list, err = plan_rename(players, old_name, new_name)
+            if err:
+                return err
+
+            # Los objetos vienen de la sesión: mutar atributos ya los marca
+            # dirty, no hace falta session.add. Un único commit = atómico.
+            comp.players_json = json.dumps(new_list)
+
+            id_field = (
+                LeagueMatch.league_id
+                if comp_type == "league"
+                else LeagueMatch.tournament_id
+            )
+            matches = session.exec(
+                select(LeagueMatch).where(id_field == comp_id)
+            ).all()
+            clean_new = new_name.strip()
+            for m in matches:
+                if m.home == old_name:
+                    m.home = clean_new
+                if m.away == old_name:
+                    m.away = clean_new
+
+            session.commit()
+
+        self._hydrate()
+        return None
+
+    async def delete_competition(self, comp_id: int, comp_type: str):
         """Elimina una competición y sus partidos. Requiere modo admin.
 
         El check vive aquí (y no sólo en la UI) porque cualquier handler
         público de un rx.State es invocable desde el cliente vía WebSocket.
+
+        `comp_type` es obligatorio: `leagues` y `tournaments` tienen
+        secuencias de id independientes, así que un id numérico solo no
+        identifica la competición (una liga y un torneo pueden compartirlo).
         """
         from .admin_state import AdminState
 
@@ -431,35 +484,29 @@ class LeagueState(rx.State):
         try:
             cid = int(comp_id) if not isinstance(comp_id, int) else comp_id
         except (TypeError, ValueError):
-            return
-        if cid <= 0:
-            return
+            cid = 0
+        if cid <= 0 or comp_type not in ("league", "tournament"):
+            return rx.toast.error("Identificador de competición inválido")
 
-        comp = next((c for c in self.competitions if c.id == cid), None)
+        if comp_type == "league":
+            model, id_field = League, LeagueMatch.league_id
+        else:
+            model, id_field = Tournament, LeagueMatch.tournament_id
 
         with rx.session() as session:
-            if comp is None or comp.competition_type == "league":
-                # Borrar partidos de liga
-                matches_q = session.exec(
-                    select(LeagueMatch).where(LeagueMatch.league_id == cid)
-                ).all()
-                for m in matches_q:
-                    session.delete(m)
-                lg = session.get(League, cid)
-                if lg is not None:
-                    session.delete(lg)
-            if comp is None or comp.competition_type == "tournament":
-                matches_q = session.exec(
-                    select(LeagueMatch).where(LeagueMatch.tournament_id == cid)
-                ).all()
-                for m in matches_q:
-                    session.delete(m)
-                tr = session.get(Tournament, cid)
-                if tr is not None:
-                    session.delete(tr)
+            for m in session.exec(
+                select(LeagueMatch).where(id_field == cid)
+            ).all():
+                session.delete(m)
+            comp = session.get(model, cid)
+            if comp is not None:
+                session.delete(comp)
             session.commit()
 
-        if self.active_competition_id == cid:
+        if (
+            self.active_competition_id == cid
+            and self.active_competition_type == comp_type
+        ):
             self.active_competition_id = 0
             self.active_competition_type = ""
 

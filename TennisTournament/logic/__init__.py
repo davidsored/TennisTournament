@@ -15,6 +15,11 @@ from .fixtures import (
     group_fixtures,
 )
 from .standings import MatchResult, StandingsRow, compute_standings
+from .validation import (
+    validate_competition_config,
+    validate_player_name,
+    validate_player_names,
+)
 from .tournament_engine import (
     BYE,
     PLACEHOLDER_PREFIX,
@@ -52,4 +57,8 @@ __all__ = [
     "FixturePairView",
     "RoundFixtures",
     "group_fixtures",
+    # Validation
+    "validate_competition_config",
+    "validate_player_name",
+    "validate_player_names",
 ]

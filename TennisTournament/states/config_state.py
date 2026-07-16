@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import reflex as rx
 
+from ..logic.validation import validate_competition_config
 from .league_state import LeagueState
 
 
@@ -94,19 +95,16 @@ class ConfigState(rx.State):
     # ---------------- Acción guardar ----------------
 
     async def save_config(self):
-        # Validación: nombre obligatorio. Aviso visual + corte temprano (no
-        # llegamos a setup_league/setup_tournament si está vacío).
+        # Validación completa (nombre, nº jugadores, rangos, duplicados) con
+        # feedback visual. Los mutadores repiten el chequeo server-side.
         name = self.tournament_name.strip()
-        if not name:
-            return rx.toast.error(
-                "Por favor, introduce un nombre para la competición"
-            )
-
         clean_players = [p for p in self.players if p.strip()]
-        if len(clean_players) < 2:
-            return rx.toast.error(
-                "Añade al menos 2 jugadores para crear la competición"
-            )
+
+        error = validate_competition_config(
+            name, clean_players, self.sets_per_match, self.games_per_set
+        )
+        if error:
+            return rx.toast.error(error)
 
         league = await self.get_state(LeagueState)
 

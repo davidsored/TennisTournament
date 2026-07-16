@@ -97,11 +97,13 @@ def test_db_engine():
 
 @pytest.fixture
 def test_db_session(test_db_engine):
-    """Sesión SQLAlchemy enlazada al engine de test.
+    """Sesión SQLModel enlazada al engine de test.
 
-    Cada test recibe una sesión nueva sobre una BD vacía.
+    `sqlmodel.Session` extiende la de SQLAlchemy con `.exec()`, que es lo
+    que usa el código de producción (states). Cada test recibe una sesión
+    nueva sobre una BD vacía.
     """
-    from sqlalchemy.orm import Session
+    from sqlmodel import Session
 
     session = Session(test_db_engine)
     try:

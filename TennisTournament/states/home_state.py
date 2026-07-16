@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import reflex as rx
 
-from .admin_state import AdminState
 from .league_state import LeagueState, STATUS_FINALIZADO
 
 
@@ -75,22 +74,20 @@ class HomeState(rx.State):
         self.active_tab = tab
 
     async def delete_competition(self, comp_id: str):
-        """Borra una competición de Postgres tras verificar admin.
+        """Borra una competición de Postgres.
 
         `comp_id` viene como string desde la UI (recent_item) — lo parseamos
-        a int antes de pasarlo a `LeagueState.delete_competition`.
+        a int antes de pasarlo a `LeagueState.delete_competition`, que es
+        quien verifica el modo admin (autorización en el mutador, no en la UI).
         """
-        admin = await self.get_state(AdminState)
-        if not admin.is_admin:
-            return rx.toast.error(
-                "Solo el administrador puede borrar competiciones"
-            )
         try:
             cid = int(comp_id)
         except (TypeError, ValueError):
             return rx.toast.error("Identificador de competición inválido")
         league = await self.get_state(LeagueState)
-        league.delete_competition(cid)
+        error = await league.delete_competition(cid)
+        if error is not None:
+            return error
         # Refresca el listado local desde la DB (post-delete).
         self.recent_competitions = [
             item for item in self.recent_competitions if item.get("id") != comp_id

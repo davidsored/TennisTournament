@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "find-skills": {
+      "source": "vercel-labs/skills",
+      "sourceType": "github",
+      "skillPath": "skills/find-skills/SKILL.md",
+      "computedHash": "781bd6d3f9b19f8c9af6b53d8d0e4876d0183841b565db34ca7092ffa412d111"
+    },
+    "python-testing-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/python-development/skills/python-testing-patterns/SKILL.md",
+      "computedHash": "f4de9bdbf2db1c1f8e8211e6af463ad49956f15aa604e2f08ae716c71e71f64b"
+    },
+    "reflex-docs": {
+      "source": "reflex-dev/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/reflex-docs/SKILL.md",
+      "computedHash": "f8c5ebccca75a3a6cbd631d1ba77880c0339291ebdc9e942e7a6f321f055ab41"
+    }
+  }
+}

@@ -18,6 +18,7 @@ from sqlmodel import select
 
 from ..logic.fixtures import FixtureMatch, group_fixtures
 from ..logic.standings import MatchResult, compute_standings
+from ..logic.validation import validate_competition_config
 from ..logic.tournament_engine import (
     compute_bracket_size,
     distribute_byes,
@@ -230,11 +231,11 @@ class LeagueState(rx.State):
         games_per_set: int = 6,
     ) -> None:
         """Crea una NUEVA liga en Postgres + calendario Round Robin x2."""
-        if not name or not name.strip():
+        # Defensa server-side: este handler es invocable directamente desde el
+        # cliente, así que no basta con la validación del formulario.
+        if validate_competition_config(name, players, sets_per_match, games_per_set):
             return
         clean = [p.strip() for p in players if p.strip()]
-        if len(clean) < 2:
-            return
 
         seeding = list(clean)
         random.shuffle(seeding)
@@ -299,11 +300,10 @@ class LeagueState(rx.State):
         orquestamos la persistencia: convertimos `BracketSlot` → `LeagueMatch`,
         commit, refresh y cableamos `next_match_id` con los ids reales.
         """
-        if not name or not name.strip():
+        # Defensa server-side (ver setup_league).
+        if validate_competition_config(name, players, sets_per_match, games_per_set):
             return
         real = [p.strip() for p in players if p.strip()]
-        if len(real) < 2:
-            return
 
         random.shuffle(real)
         bracket_size = compute_bracket_size(len(real))
@@ -415,8 +415,19 @@ class LeagueState(rx.State):
 
         self._hydrate()
 
-    def delete_competition(self, comp_id: int) -> None:
-        """Elimina una competición y sus partidos (sólo invocado tras check admin)."""
+    async def delete_competition(self, comp_id: int):
+        """Elimina una competición y sus partidos. Requiere modo admin.
+
+        El check vive aquí (y no sólo en la UI) porque cualquier handler
+        público de un rx.State es invocable desde el cliente vía WebSocket.
+        """
+        from .admin_state import AdminState
+
+        admin = await self.get_state(AdminState)
+        if not admin.is_admin:
+            return rx.toast.error(
+                "Solo el administrador puede borrar competiciones"
+            )
         try:
             cid = int(comp_id) if not isinstance(comp_id, int) else comp_id
         except (TypeError, ValueError):

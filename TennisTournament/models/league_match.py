@@ -44,6 +44,10 @@ class LeagueMatch(rx.Model, table=True):
     config_sets: int = 3
     config_games: int = 6
 
+    # Sacador inicial elegido en el marcador (1 = home, 2 = away).
+    # NULL = aún no elegido; el modal de saque se muestra al abrir el partido.
+    initial_server: Optional[int] = None
+
     # Tournament-specific
     bracket_position: Optional[int] = None
     next_match_id: Optional[int] = None

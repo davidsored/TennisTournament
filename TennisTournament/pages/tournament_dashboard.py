@@ -10,6 +10,7 @@ from __future__ import annotations
 import reflex as rx
 
 from ..components.bottom_nav import bottom_nav
+from ..components.edit_players_dialog import edit_players_button, edit_players_dialog
 from ..components.material_icon import material_icon
 from ..states.tournament_state import TournamentState
 
@@ -498,9 +499,19 @@ def tournament_dashboard() -> rx.Component:
         _top_bar(),
         rx.el.main(
             rx.box(
-                rx.el.h1(
-                    TournamentState.tournament_name,
-                    class_name="text-headline-xl text-on-surface mb-xs",
+                rx.box(
+                    rx.el.h1(
+                        TournamentState.tournament_name,
+                        class_name="text-headline-xl text-on-surface",
+                    ),
+                    rx.cond(
+                        TournamentState.has_tournament,
+                        edit_players_button(
+                            TournamentState.tournament_id, "tournament"
+                        ),
+                        rx.fragment(),
+                    ),
+                    class_name="flex items-center justify-center gap-xs mb-xs",
                 ),
                 rx.el.p(
                     TournamentState.tournament_subtitle,
@@ -527,6 +538,7 @@ def tournament_dashboard() -> rx.Component:
             ),
         ),
         bottom_nav(),
+        edit_players_dialog(),
         class_name=(
             "bg-surface text-on-surface text-body-md min-h-screen "
             "flex flex-col pb-24 md:pb-0 font-sans"

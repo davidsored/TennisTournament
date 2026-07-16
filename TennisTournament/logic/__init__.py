@@ -14,6 +14,8 @@ from .fixtures import (
     RoundFixtures,
     group_fixtures,
 )
+from .players import plan_rename
+from .serving import resolve_initial_server
 from .standings import MatchResult, StandingsRow, compute_standings
 from .validation import (
     validate_competition_config,
@@ -57,6 +59,10 @@ __all__ = [
     "FixturePairView",
     "RoundFixtures",
     "group_fixtures",
+    # Players
+    "plan_rename",
+    # Serving
+    "resolve_initial_server",
     # Validation
     "validate_competition_config",
     "validate_player_name",

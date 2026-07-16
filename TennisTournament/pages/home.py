@@ -11,6 +11,7 @@ import reflex as rx
 
 from ..components.bento_card import bento_card
 from ..components.bottom_nav import bottom_nav
+from ..components.dialog_style import DIALOG_CONTENT_STYLE
 from ..components.material_icon import material_icon
 from ..components.recent_item import recent_item
 from ..components.top_bar import top_bar
@@ -228,13 +229,7 @@ def _admin_dialog() -> rx.Component:
                 _admin_dialog_authed(),
                 _admin_dialog_unauth(),
             ),
-            style={
-                "min_width": "450px",  # Forzamos un mínimo de 450px
-                "max_width": "90vw",   # O el 90% de la pantalla en móviles
-                "padding": "24px",
-                "background_color": "var(--surface-container-lowest)",
-                "border_radius": "12px",
-            },
+            style=DIALOG_CONTENT_STYLE,
         ),
         open=AdminState.dialog_open,
         on_open_change=AdminState.set_dialog_open,

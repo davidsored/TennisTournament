@@ -101,7 +101,7 @@ class TestDeleteCompetitionAuthorization:
         state = _make_league_state()
 
         # Act: invocación directa del mutador (simula RPC malicioso).
-        result = asyncio.run(state.delete_competition(league.id))
+        result = asyncio.run(state.delete_competition(league.id, "league"))
 
         # Assert: la liga y sus partidos siguen intactos y hay respuesta
         # (toast de error) en lugar de silencio.
@@ -119,7 +119,7 @@ class TestDeleteCompetitionAuthorization:
         state = _make_league_state()
 
         # Act
-        result = asyncio.run(state.delete_competition(league.id))
+        result = asyncio.run(state.delete_competition(league.id, "league"))
 
         # Assert: liga y partidos eliminados; sin toast de error (None).
         assert session.get(League, league.id) is None
@@ -134,9 +134,53 @@ class TestDeleteCompetitionAuthorization:
         _patch_get_state(monkeypatch, _make_admin_state(token="otra-clave"))
         state = _make_league_state()
 
-        asyncio.run(state.delete_competition(league.id))
+        asyncio.run(state.delete_competition(league.id, "league"))
 
         assert session.get(League, league.id) is not None
+
+    def test_id_invalido_devuelve_error(
+        self, mock_rx_session, admin_env, monkeypatch
+    ):
+        """Un id no positivo o tipo desconocido no debe reportar éxito."""
+        _patch_get_state(monkeypatch, _make_admin_state(token=ADMIN_KEY))
+        state = _make_league_state()
+
+        assert asyncio.run(state.delete_competition(0, "league")) is not None
+        assert asyncio.run(state.delete_competition("x", "league")) is not None
+        assert asyncio.run(state.delete_competition(1, "otro")) is not None
+
+    def test_id_compartido_liga_torneo_solo_borra_el_tipo_pedido(
+        self, mock_rx_session, admin_env, monkeypatch
+    ):
+        """`leagues` y `tournaments` tienen secuencias de id independientes:
+        borrar el torneo id=1 no debe tocar la liga id=1."""
+        session = mock_rx_session
+        league = _seed_league(session)  # League id=1
+        tournament = Tournament(
+            name="Torneo Test",
+            sets_per_match=3,
+            games_per_set=6,
+            players_json=json.dumps(["Xavi", "Zoe"]),
+        )
+        session.add(tournament)
+        session.commit()
+        session.refresh(tournament)
+        assert tournament.id == league.id  # colisión real de ids
+
+        _patch_get_state(monkeypatch, _make_admin_state(token=ADMIN_KEY))
+        state = _make_league_state()
+
+        result = asyncio.run(
+            state.delete_competition(tournament.id, "tournament")
+        )
+
+        assert result is None
+        assert session.get(Tournament, tournament.id) is None
+        assert session.get(League, league.id) is not None, (
+            "la liga con el mismo id numérico debe sobrevivir"
+        )
+        # Los partidos de la liga tampoco deben borrarse.
+        assert len(session.exec(select(LeagueMatch)).all()) == 1
 
 
 # =============================================================================

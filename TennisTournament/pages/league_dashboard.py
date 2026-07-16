@@ -5,6 +5,7 @@ from __future__ import annotations
 import reflex as rx
 
 from ..components.bottom_nav import bottom_nav
+from ..components.edit_players_dialog import edit_players_button, edit_players_dialog
 from ..components.material_icon import material_icon
 from ..states.league_state import LeagueState
 
@@ -120,7 +121,11 @@ def _standings_row(row) -> rx.Component:
 
 def _standings_section() -> rx.Component:
     return rx.el.section(
-        rx.el.h2("Standings", class_name="text-headline-lg text-on-surface"),
+        rx.box(
+            rx.el.h2("Standings", class_name="text-headline-lg text-on-surface"),
+            edit_players_button(LeagueState.active_competition_id, "league"),
+            class_name="flex items-center justify-between",
+        ),
         rx.box(
             rx.box(
                 rx.el.table(
@@ -408,6 +413,7 @@ def league_dashboard() -> rx.Component:
             ),
         ),
         bottom_nav(),
+        edit_players_dialog(),
         class_name=(
             "bg-surface text-on-surface text-body-md min-h-screen "
             "flex flex-col pb-24 md:pb-0 font-sans"

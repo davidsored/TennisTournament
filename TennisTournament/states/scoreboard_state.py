@@ -12,7 +12,11 @@ import json
 
 import reflex as rx
 
+from ..logic.serving import resolve_initial_server
+from ..models.league import League
+from ..models.league_match import LeagueMatch
 from ..models.match import ESTADO_EN_CURSO, ESTADO_FINALIZADO, Match
+from ..models.tournament import Tournament
 from .league_state import LeagueState
 
 
@@ -54,6 +58,12 @@ class ScoreboardState(rx.State):
     # Servidor activo (1 ó 2). Rota tras cada juego cerrado.
     server_id: int = 1
 
+    # True cuando el sacador inicial ya fue elegido (o recuperado de la DB).
+    # Mientras sea False y haya partido cargado, la UI muestra el modal
+    # "¿Quién comienza sacando?". Queda FUERA de la pila de undo a propósito:
+    # deshacer hasta 0-0 no debe volver a preguntar.
+    server_chosen: bool = False
+
     # Pila de snapshots (JSON) para soportar deshacer la última acción.
     history: list[str] = []
 
@@ -78,6 +88,7 @@ class ScoreboardState(rx.State):
         self.set_history = []
         self.history = []
         self.server_id = 1
+        self.server_chosen = False
 
     async def setup_scoreboard(self):
         """Hidrata el marcador desde los query params de la URL.
@@ -134,37 +145,44 @@ class ScoreboardState(rx.State):
         except (TypeError, ValueError):
             return
 
-        # Hidratar y buscar el partido (los ids son globales en `league_matches`).
-        league = await self.get_state(LeagueState)
-        league._hydrate()
-        target_comp = None
-        target_match = None
-        for comp in league.competitions:
-            for m in comp.matches:
-                if m.id == match_id:
-                    target_comp = comp
-                    target_match = m
-                    break
-            if target_match is not None:
-                break
-
-        if target_match is None or target_comp is None:
-            return
+        # Consultas dirigidas: el partido por PK y su competición padre para
+        # el título. (Antes se hidrataba TODA la BD y se buscaba en bucles.)
+        with rx.session() as session:
+            target_match = session.get(LeagueMatch, match_id)
+            if target_match is None:
+                return
+            comp = None
+            if target_match.tournament_id is not None:
+                comp = session.get(Tournament, target_match.tournament_id)
+            elif target_match.league_id is not None:
+                comp = session.get(League, target_match.league_id)
 
         self.player_j1 = target_match.home
         self.player_j2 = target_match.away
         self.league_match_id = match_id
+        # Sacador inicial: si ya se eligió (persistido en DB) lo recuperamos;
+        # si el partido ya tiene progreso o terminó, no volvemos a preguntar.
+        self.server_id, self.server_chosen = resolve_initial_server(
+            target_match.initial_server,
+            target_match.status,
+            target_match.sets_home,
+            target_match.sets_away,
+        )
         # CRÍTICO: leer el scoring config DESDE EL PARTIDO (desnormalizado en
         # league_matches). Si el match guarda 4 juegos por set, el marcador
         # debe cerrar el set en 4-2/5-3 etc., no en 6-X.
-        self.config_sets = target_match.config_sets or target_comp.sets_per_match
-        self.config_games = target_match.config_games or target_comp.games_per_set
-        self.match_title = target_comp.name or "Partido"
+        self.config_sets = target_match.config_sets or (
+            comp.sets_per_match if comp else 3
+        )
+        self.config_games = target_match.config_games or (
+            comp.games_per_set if comp else 6
+        )
+        self.match_title = (comp.name if comp else "") or "Partido"
         # Recordamos el origen del partido para volver al dashboard correcto
         # tras finalizar (torneo vs liga). `tournament_id` se almacena como
         # string para mantenerlo simple en el state; se usa tal cual en la URL.
-        if target_comp.competition_type == "tournament":
-            self.tournament_id = str(target_comp.id)
+        if target_match.tournament_id is not None:
+            self.tournament_id = str(target_match.tournament_id)
             self.match_subtitle = f"Ronda {target_match.round_num}"
         else:
             self.tournament_id = ""
@@ -276,6 +294,20 @@ class ScoreboardState(rx.State):
     @rx.var
     def is_server_j2(self) -> bool:
         return self.server_id == 2
+
+    @rx.var
+    def show_server_modal(self) -> bool:
+        """True mientras falte elegir sacador en un partido cargado y en curso.
+
+        La guarda sobre los nombres evita que el modal aparezca en /scoreboard
+        sin query params (marcador vacío).
+        """
+        return (
+            not self.server_chosen
+            and self.estado != ESTADO_FINALIZADO
+            and bool(self.player_j1)
+            and bool(self.player_j2)
+        )
 
     @rx.var
     def is_finished(self) -> bool:
@@ -398,6 +430,25 @@ class ScoreboardState(rx.State):
         self.set_history = []
         self.history = []
         self.server_id = 1
+        # Reiniciar el partido vuelve a preguntar quién saca.
+        self.server_chosen = False
 
-    def toggle_server(self) -> None:
-        self.server_id = 2 if self.server_id == 1 else 1
+    def choose_server(self, player_id: int) -> None:
+        """Fija el sacador inicial elegido en el modal.
+
+        Para partidos de competición persiste la elección en la fila
+        `league_matches` (sobrevive a refrescos y queda registrada).
+        Los turnos posteriores siguen rotando en `sumar_punto`.
+        """
+        if player_id not in (1, 2) or self.server_chosen:
+            return
+        self.server_id = player_id
+        self.server_chosen = True
+
+        if self.league_match_id > 0:
+            with rx.session() as session:
+                m = session.get(LeagueMatch, self.league_match_id)
+                if m is not None:
+                    m.initial_server = player_id
+                    session.add(m)
+                    session.commit()

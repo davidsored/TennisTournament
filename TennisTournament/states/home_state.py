@@ -50,6 +50,9 @@ class HomeState(rx.State):
             items.append(
                 {
                     "id": str(comp.id),  # str para que list[dict[str, str]] funcione
+                    # Necesario para borrar sin ambigüedad: leagues y
+                    # tournaments tienen secuencias de id independientes.
+                    "type": comp.competition_type,
                     "title": comp.name or "Competición sin nombre",
                     "subtitle": f"{type_label} • {unique_players} jugadores",
                     "icon": icon,
@@ -73,23 +76,22 @@ class HomeState(rx.State):
     def select_tab(self, tab: str) -> None:
         self.active_tab = tab
 
-    async def delete_competition(self, comp_id: str):
+    async def delete_competition(self, comp_id: str, comp_type: str):
         """Borra una competición de Postgres.
 
-        `comp_id` viene como string desde la UI (recent_item) — lo parseamos
-        a int antes de pasarlo a `LeagueState.delete_competition`, que es
-        quien verifica el modo admin (autorización en el mutador, no en la UI).
+        Delegamos validación y autorización en `LeagueState.delete_competition`
+        (el mutador verifica modo admin, id y tipo — no la UI).
         """
-        try:
-            cid = int(comp_id)
-        except (TypeError, ValueError):
-            return rx.toast.error("Identificador de competición inválido")
         league = await self.get_state(LeagueState)
-        error = await league.delete_competition(cid)
+        error = await league.delete_competition(comp_id, comp_type)
         if error is not None:
             return error
         # Refresca el listado local desde la DB (post-delete).
         self.recent_competitions = [
-            item for item in self.recent_competitions if item.get("id") != comp_id
+            item
+            for item in self.recent_competitions
+            if not (
+                item.get("id") == comp_id and item.get("type") == comp_type
+            )
         ]
         return rx.toast.success("Competición eliminada")

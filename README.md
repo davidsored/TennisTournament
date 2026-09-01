@@ -11,6 +11,7 @@
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 [![Coverage](https://img.shields.io/badge/coverage-logic%20100%25-success)](./tests/unit)
 [![GitHub](https://img.shields.io/badge/github-davidsored%2FTennisTournament-181717?logo=github)](https://github.com/davidsored/TennisTournament)
+[![portfolio](https://img.shields.io/badge/portfolio-www.dsor.es-000000)](https://www.dsor.es/proyectos/tennis-tournament)
 
 <p align="center">
   <img src="assets/screenshots/home.png" alt="Dashboard de CourtManager" width="800">
@@ -252,6 +253,12 @@ Antes de mandar un PR:
 ## 📜 Licencia
 
 MIT — ver [`LICENSE`](./LICENSE).
+
+---
+
+## 👤 Autor
+
+Desarrollado por **David Suárez-Otero Redondo** — más proyectos y contacto en [www.dsor.es](https://www.dsor.es/proyectos/tennis-tournament).
 
 ---
 
